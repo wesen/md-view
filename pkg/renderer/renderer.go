@@ -33,6 +33,9 @@ var mermaidInitJS []byte
 //go:embed static/mermaid.min.js
 var mermaidJS []byte
 
+//go:embed static/copy-button.js
+var copyButtonJS []byte
+
 // CSS returns the embedded GitHub-flavored CSS (light theme).
 func CSS() []byte {
 	return defaultCSS
@@ -51,6 +54,11 @@ func ReloadJS() []byte {
 // MermaidJS returns the embedded mermaid.js library.
 func MermaidJS() []byte {
 	return mermaidJS
+}
+
+// CopyButtonJS returns the embedded copy-to-clipboard script.
+func CopyButtonJS() []byte {
+	return copyButtonJS
 }
 
 // ChromaCSS returns the CSS for syntax highlighting.
@@ -480,6 +488,11 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 %s
 </script>`, opts.Port, string(mermaidInitJS))
 
+	// Copy-to-clipboard script
+	copyButtonScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(copyButtonJS))
+
 	// Theme toggle script
 	themeToggleScript := `<script>
 (function() {
@@ -569,7 +582,7 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		fmHTML,
 		renderedHTML,
 		mermaidScript,
-		reloadScript+themeToggleScript,
+		reloadScript+themeToggleScript+copyButtonScript,
 	)
 
 	return htmlPage, nil

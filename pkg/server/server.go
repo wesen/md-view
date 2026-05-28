@@ -386,6 +386,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "/static/mermaid.min.js":
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write(renderer.MermaidJS())
+	case "/static/copy-button.js":
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write(renderer.CopyButtonJS())
 	default:
 		http.NotFound(w, r)
 	}

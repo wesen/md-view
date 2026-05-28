@@ -123,3 +123,45 @@
 .markdown-body .task-list-item + .task-list-item {
     margin-top: 4px;
 }
+
+/* Copy-to-clipboard button */
+.md-view-code-container {
+    position: relative;
+}
+
+.md-view-code-container > pre {
+    margin-bottom: 0;
+}
+
+.md-view-copy-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: #fff;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 6px;
+    cursor: pointer;
+    color: #656d76;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.md-view-code-container:hover > .md-view-copy-btn,
+.md-view-copy-btn:focus {
+    opacity: 0.8;
+}
+
+.md-view-copy-btn:hover {
+    color: #24292e;
+    opacity: 1 !important;
+}
+
+.md-view-copy-btn-success {
+    color: #1a7f37 !important;
+    opacity: 1 !important;
+}
