@@ -271,9 +271,19 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 	// Check for theme parameter
 	dark := r.URL.Query().Get("theme") == "dark"
 
-	// Register the file's directory as allowed for /file/ serving
+	// Register the file's directory and all ancestor directories as allowed
+	// for /file/ serving. This is necessary because markdown can reference
+	// images with ../ paths that resolve outside the immediate parent dir.
 	s.mu.Lock()
-	s.allowedDirs[filepath.Dir(absPath)] = true
+	dir := filepath.Dir(absPath)
+	for {
+		s.allowedDirs[dir] = true
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
 	s.mu.Unlock()
 
 	opts := renderer.Options{
