@@ -374,6 +374,47 @@ func themeCSS(dark bool) string {
 	return light + darkOverrides
 }
 
+// rewriteImagePaths rewrites relative <img src="..."> paths to absolute /file/ URLs
+// so the browser can fetch them from the server's /file/ handler.
+// mdFilePath is the absolute path of the markdown file being rendered.
+// port is the server's HTTP port.
+var reImgSrc = regexp.MustCompile(`<img\s[^>]*src="([^"]+)"`)
+
+func rewriteImagePaths(htmlContent string, mdFilePath string, port int) string {
+	fileDir := filepath.Dir(mdFilePath)
+
+	return reImgSrc.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
+		submatch := reImgSrc.FindStringSubmatch(imgTag)
+		if len(submatch) < 2 {
+			return imgTag
+		}
+		src := submatch[1]
+
+		// Skip absolute URLs, data URIs, anchors, and scheme-only
+		if strings.HasPrefix(src, "http://") ||
+			strings.HasPrefix(src, "https://") ||
+			strings.HasPrefix(src, "data:") ||
+			strings.HasPrefix(src, "#") ||
+			strings.HasPrefix(src, "//") {
+			return imgTag
+		}
+
+		// Skip paths that are already /file/ URLs
+		if strings.HasPrefix(src, "/file/") {
+			return imgTag
+		}
+
+		// Resolve relative path against the markdown file's directory
+		resolved := filepath.Join(fileDir, src)
+		resolved = filepath.Clean(resolved)
+
+		// Build the new src: /file/<absolute-path>
+		newSrc := "/file/" + resolved
+
+		return strings.Replace(imgTag, `src="`+src+`"`, `src="`+newSrc+`"`, 1)
+	})
+}
+
 // Render reads a markdown file and returns full HTML.
 func Render(filePath string, opts Options) (string, error) {
 	data, err := os.ReadFile(filePath)
@@ -407,6 +448,10 @@ func Render(filePath string, opts Options) (string, error) {
 	if err := md.Convert(body, &buf); err != nil {
 		return "", fmt.Errorf("cannot convert markdown: %w", err)
 	}
+
+	// Rewrite relative image paths to /file/<abs-path> so the browser
+	// can load them through the server's /file/ handler.
+	renderedHTML := rewriteImagePaths(buf.String(), filePath, opts.Port)
 
 	chromaCSS, err := ChromaCSSBoth()
 	if err != nil {
@@ -522,7 +567,7 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		darkStyle,
 		themeToggleBtn,
 		fmHTML,
-		buf.String(),
+		renderedHTML,
 		mermaidScript,
 		reloadScript+themeToggleScript,
 	)

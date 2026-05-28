@@ -151,6 +151,80 @@ func TestRenderWithFrontmatterLowercase(t *testing.T) {
 	}
 }
 
+func TestRewriteImagePaths(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		mdFile  string
+		wantSrc string
+	}{
+		{
+			name:    "relative image",
+			input:   `<img src="./images/diagram.png" alt="diagram">`,
+			mdFile:  "/home/user/project/README.md",
+			wantSrc: `/file//home/user/project/images/diagram.png`,
+		},
+		{
+			name:    "relative image without dot",
+			input:   `<img src="images/photo.jpg" alt="photo">`,
+			mdFile:  "/home/user/project/README.md",
+			wantSrc: `/file//home/user/project/images/photo.jpg`,
+		},
+		{
+			name:    "absolute URL unchanged",
+			input:   `<img src="https://example.com/img.png" alt="ext">`,
+			mdFile:  "/home/user/project/README.md",
+			wantSrc: "https://example.com/img.png",
+		},
+		{
+			name:    "data URI unchanged",
+			input:   `<img src="data:image/png;base64,abc123" alt="inline">`,
+			mdFile:  "/home/user/project/README.md",
+			wantSrc: "data:image/png;base64,abc123",
+		},
+		{
+			name:    "no images",
+			input:   `<p>Hello world</p>`,
+			mdFile:  "/home/user/project/README.md",
+			wantSrc: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := rewriteImagePaths(tt.input, tt.mdFile, 8080)
+			if tt.wantSrc == "" {
+				if contains(result, "/file/") {
+					t.Errorf("unexpected /file/ rewrite in %q", result)
+				}
+				return
+			}
+			if !contains(result, `src="`+tt.wantSrc+`"`) {
+				t.Errorf("rewriteImagePaths() = %q, want src=%q", result, tt.wantSrc)
+			}
+		})
+	}
+}
+
+func TestRenderWithImages(t *testing.T) {
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "test.md")
+	content := "# Hello\n\n![diagram](./images/diagram.png)\n"
+	if err := os.WriteFile(mdFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	html, err := Render(mdFile, Options{NoReload: true, Port: 8080})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	expectedSrc := "/file/" + filepath.Join(tmpDir, "images/diagram.png")
+	if !contains(html, expectedSrc) {
+		t.Errorf("Render() should rewrite image src to %q, got HTML:\n%s", expectedSrc, html)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

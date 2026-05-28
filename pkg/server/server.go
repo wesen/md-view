@@ -25,13 +25,14 @@ import (
 
 // Server is the md-view HTTP + Unix socket server.
 type Server struct {
-	httpServer *http.Server
-	port       int
-	watcher    *watcher.FileWatcher
-	mu         sync.Mutex
-	sseClients map[string]map[<-chan struct{}]struct{} // file path → set of watch channels
-	browser    string                                  // override browser command
-	noReload   bool                                    // disable live reload
+	httpServer  *http.Server
+	port        int
+	watcher     *watcher.FileWatcher
+	mu          sync.Mutex
+	sseClients  map[string]map[<-chan struct{}]struct{} // file path → set of watch channels
+	browser     string                                  // override browser command
+	noReload    bool                                    // disable live reload
+	allowedDirs map[string]bool                         // directories allowed for /file/ serving
 }
 
 // NewServer creates a new Server bound to localhost on the given port (0 = random).
@@ -42,11 +43,12 @@ func NewServer(port int, browser string, noReload bool) (*Server, error) {
 	}
 
 	s := &Server{
-		port:       port,
-		watcher:    fw,
-		sseClients: make(map[string]map[<-chan struct{}]struct{}),
-		browser:    browser,
-		noReload:   noReload,
+		port:        port,
+		watcher:     fw,
+		sseClients:  make(map[string]map[<-chan struct{}]struct{}),
+		browser:     browser,
+		noReload:    noReload,
+		allowedDirs: make(map[string]bool),
 	}
 
 	mux := http.NewServeMux()
@@ -54,6 +56,7 @@ func NewServer(port int, browser string, noReload bool) (*Server, error) {
 	mux.HandleFunc("/raw", s.handleRaw)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/static/", s.handleStatic)
+	mux.HandleFunc("/file/", s.handleFileServing)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 
 	s.httpServer = &http.Server{
@@ -268,6 +271,11 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 	// Check for theme parameter
 	dark := r.URL.Query().Get("theme") == "dark"
 
+	// Register the file's directory as allowed for /file/ serving
+	s.mu.Lock()
+	s.allowedDirs[filepath.Dir(absPath)] = true
+	s.mu.Unlock()
+
 	opts := renderer.Options{
 		File:     absPath,
 		Port:     s.port,
@@ -381,6 +389,46 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+func (s *Server) handleFileServing(w http.ResponseWriter, r *http.Request) {
+	// URL path: /file/<absolute-path>
+	// e.g. /file/home/user/project/images/diagram.png
+	filePath := strings.TrimPrefix(r.URL.Path, "/file/")
+	if filePath == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Security: only serve files under an allowed directory
+	s.mu.Lock()
+	allowed := false
+	for dir := range s.allowedDirs {
+		if strings.HasPrefix(absPath, dir+string(filepath.Separator)) || absPath == dir {
+			allowed = true
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if !allowed {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+
+	http.ServeFile(w, r, absPath)
 }
 
 func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
