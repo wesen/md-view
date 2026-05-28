@@ -3,6 +3,7 @@ package renderer
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -162,13 +163,13 @@ func TestRewriteImagePaths(t *testing.T) {
 			name:    "relative image",
 			input:   `<img src="./images/diagram.png" alt="diagram">`,
 			mdFile:  "/home/user/project/README.md",
-			wantSrc: `/file//home/user/project/images/diagram.png`,
+			wantSrc: `/file/home/user/project/images/diagram.png`,
 		},
 		{
 			name:    "relative image without dot",
 			input:   `<img src="images/photo.jpg" alt="photo">`,
 			mdFile:  "/home/user/project/README.md",
-			wantSrc: `/file//home/user/project/images/photo.jpg`,
+			wantSrc: `/file/home/user/project/images/photo.jpg`,
 		},
 		{
 			name:    "absolute URL unchanged",
@@ -219,9 +220,53 @@ func TestRenderWithImages(t *testing.T) {
 		t.Fatalf("Render() error = %v", err)
 	}
 
-	expectedSrc := "/file/" + filepath.Join(tmpDir, "images/diagram.png")
+	expectedSrc := "/file/" + strings.TrimPrefix(filepath.Join(tmpDir, "images/diagram.png"), "/")
 	if !contains(html, expectedSrc) {
 		t.Errorf("Render() should rewrite image src to %q, got HTML:\n%s", expectedSrc, html)
+	}
+}
+
+func TestRenderWithCodeBlockHasCopyButton(t *testing.T) {
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "test.md")
+	content := "# Hello\n\n```go\nfmt.Println(\"hello\")\n```\n"
+	if err := os.WriteFile(mdFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	html, err := Render(mdFile, Options{NoReload: true, Port: 8080})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Should have the copy button script
+	if !contains(html, "md-view-copy-btn") {
+		t.Error("Render() should include copy-to-clipboard script")
+	}
+	if !contains(html, "md-view-code-container") {
+		t.Error("Render() should include code container CSS class")
+	}
+}
+
+func TestRenderWithMermaidBlock(t *testing.T) {
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "test.md")
+	content := "# Diagram\n\n```mermaid\ngraph TD; A-->B;\n```\n"
+	if err := os.WriteFile(mdFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	html, err := Render(mdFile, Options{NoReload: true, Port: 8080})
+	if err != nil {
+		t.Fatalf("Render() error = %v", err)
+	}
+
+	// Should have mermaid init script
+	if !contains(html, "mermaid.initialize") {
+		t.Error("Render() should include mermaid init script")
+	}
+	if !contains(html, "mermaid.min.js") {
+		t.Error("Render() should include mermaid.js library")
 	}
 }
 

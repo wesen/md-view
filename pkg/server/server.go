@@ -395,12 +395,17 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFileServing(w http.ResponseWriter, r *http.Request) {
-	// URL path: /file/<absolute-path>
-	// e.g. /file/home/user/project/images/diagram.png
+	// URL path: /file/<path-without-leading-slash>
+	// e.g. /file/tmp/md-test/images/diagram.png (absolute path was /tmp/md-test/...)
 	filePath := strings.TrimPrefix(r.URL.Path, "/file/")
 	if filePath == "" {
 		http.NotFound(w, r)
 		return
+	}
+
+	// Re-add the leading / stripped to avoid // in URLs
+	if !strings.HasPrefix(filePath, "/") {
+		filePath = "/" + filePath
 	}
 
 	absPath, err := filepath.Abs(filePath)
@@ -431,7 +436,16 @@ func (s *Server) handleFileServing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.ServeFile(w, r, absPath)
+	// Read and serve the file directly (don't use http.ServeFile — it
+	// redirects to "clean" the URL, breaking absolute paths with leading /).
+	f, err := os.Open(absPath)
+	if err != nil {
+		http.Error(w, "cannot open file", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), f)
 }
 
 func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
