@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -18,11 +17,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-go-golems/logcopter/pkg/logcopter"
+
 	"github.com/go-go-golems/md-view/pkg/daemon"
 	"github.com/go-go-golems/md-view/pkg/protocol"
 	"github.com/go-go-golems/md-view/pkg/renderer"
 	"github.com/go-go-golems/md-view/pkg/watcher"
 )
+
+var log = logcopter.Package("md-view.server")
 
 // Server is the md-view HTTP + Unix socket server.
 type Server struct {
@@ -114,14 +117,14 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		select {
 		case <-sigCh:
-			log.Println("Received shutdown signal")
+			log.Info().Msg("Received shutdown signal")
 			s.Shutdown()
 		case <-ctx.Done():
 			s.Shutdown()
 		}
 	}()
 
-	log.Printf("md-view server listening on http://localhost:%d (socket: %s)", s.port, socketPath)
+	log.Info().Int("port", s.port).Str("socket", socketPath).Msg("md-view server listening")
 
 	// Serve HTTP
 	errCh := make(chan error, 1)
@@ -163,7 +166,7 @@ func (s *Server) acceptUnixConnections(ctx context.Context, listener net.Listene
 			case <-ctx.Done():
 				return
 			default:
-				log.Printf("Unix socket accept error: %v", err)
+				log.Warn().Err(err).Msg("Unix socket accept error")
 				continue
 			}
 		}
@@ -500,13 +503,13 @@ func (s *Server) handleUploadRemarkable(w http.ResponseWriter, r *http.Request) 
 		if errMsg == "" {
 			errMsg = err.Error()
 		}
-		log.Printf("reMarkable upload failed for %s: %s", absPath, errMsg)
+		log.Error().Str("file", absPath).Str("error", errMsg).Msg("reMarkable upload failed")
 		s.writeErrorJSON(w, http.StatusInternalServerError, errMsg)
 		return
 	}
 
 	output := strings.TrimSpace(stdout.String())
-	log.Printf("reMarkable upload succeeded for %s: %s", absPath, output)
+	log.Info().Str("file", absPath).Str("output", output).Msg("reMarkable upload succeeded")
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{
@@ -547,7 +550,7 @@ func (s *Server) openBrowser(url string) {
 		}
 	}
 	if browser == "" {
-		log.Println("Warning: no browser found (set $BROWSER)")
+		log.Warn().Msg("no browser found (set $BROWSER)")
 		return
 	}
 
@@ -563,7 +566,7 @@ func (s *Server) openBrowser(url string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		log.Printf("Cannot open browser: %v", err)
+		log.Warn().Err(err).Msg("Cannot open browser")
 	}
 }
 
@@ -582,7 +585,7 @@ func (s *Server) openBrowserWith(url, browserCmd string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		log.Printf("Cannot open browser %q: %v", browserCmd, err)
+		log.Warn().Str("browser", browserCmd).Err(err).Msg("Cannot open browser")
 	}
 }
 

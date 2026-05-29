@@ -3,16 +3,19 @@ package commands
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
 
+	"github.com/go-go-golems/logcopter/pkg/logcopter"
+
 	"github.com/go-go-golems/md-view/pkg/daemon"
 	"github.com/go-go-golems/md-view/pkg/protocol"
 	"github.com/go-go-golems/md-view/pkg/server"
 )
+
+var log = logcopter.Package("md-view.commands")
 
 // RunView implements the `md-view view` command logic:
 // 1. Check if daemon is alive
@@ -140,7 +143,7 @@ func ensureDaemonRunning(port int) error {
 		return fmt.Errorf("cannot start daemon: %w", err)
 	}
 
-	log.Printf("Started md-view daemon (PID %d)", cmd.Process.Pid)
+	log.Info().Int("pid", cmd.Process.Pid).Msg("Started md-view daemon")
 
 	// Wait for PID file to appear
 	if err := waitForPIDFile(5 * time.Second); err != nil {
