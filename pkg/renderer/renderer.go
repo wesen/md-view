@@ -36,6 +36,9 @@ var mermaidJS []byte
 //go:embed static/copy-button.js
 var copyButtonJS []byte
 
+//go:embed static/remarkable-button.js
+var remarkableButtonJS []byte
+
 // CSS returns the embedded GitHub-flavored CSS (light theme).
 func CSS() []byte {
 	return defaultCSS
@@ -59,6 +62,11 @@ func MermaidJS() []byte {
 // CopyButtonJS returns the embedded copy-to-clipboard script.
 func CopyButtonJS() []byte {
 	return copyButtonJS
+}
+
+// RemarkableButtonJS returns the embedded reMarkable upload button script.
+func RemarkableButtonJS() []byte {
+	return remarkableButtonJS
 }
 
 // ChromaCSS returns the CSS for syntax highlighting.
@@ -346,6 +354,78 @@ func themeCSS(dark bool) string {
 .md-view-theme-toggle:hover {
     opacity: 1;
 }
+/* reMarkable upload button */
+.md-view-remarkable-btn {
+    position: fixed;
+    top: 12px;
+    right: 80px;
+    z-index: 100;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #656d76;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.md-view-remarkable-btn:hover {
+    opacity: 1;
+    color: #24292e;
+}
+.md-view-remarkable-btn:disabled {
+    cursor: wait;
+    opacity: 0.9 !important;
+}
+.md-view-remarkable-btn-loading svg {
+    animation: md-view-spin 0.8s linear infinite;
+}
+.md-view-remarkable-btn-success {
+    color: #1a7f37 !important;
+    opacity: 1 !important;
+}
+.md-view-remarkable-btn-error {
+    color: #cf222e !important;
+    opacity: 1 !important;
+}
+@keyframes md-view-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+/* reMarkable upload status toast */
+.md-view-remarkable-toast {
+    position: fixed;
+    top: 50px;
+    right: 12px;
+    z-index: 101;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #24292e;
+    max-width: 400px;
+    word-break: break-word;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.md-view-remarkable-toast-success {
+    border-color: #1a7f37;
+    color: #1a7f37;
+}
+.md-view-remarkable-toast-error {
+    border-color: #cf222e;
+    color: #cf222e;
+}
+.md-view-remarkable-toast-loading {
+    color: #656d76;
+}
+.md-view-remarkable-toast-loading svg {
+    animation: md-view-spin 0.8s linear infinite;
+}
 `
 
 	darkOverrides := `
@@ -376,6 +456,33 @@ func themeCSS(dark bool) string {
     background: #21262d;
     border-color: #30363d;
     color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-remarkable-btn {
+    background: #21262d;
+    border-color: #30363d;
+    color: #8b949e;
+}
+[data-theme="dark"] .md-view-remarkable-btn:hover {
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-remarkable-btn-success {
+    color: #3fb950 !important;
+}
+[data-theme="dark"] .md-view-remarkable-btn-error {
+    color: #f85149 !important;
+}
+[data-theme="dark"] .md-view-remarkable-toast {
+    background: #21262d;
+    border-color: #30363d;
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-remarkable-toast-success {
+    border-color: #3fb950;
+    color: #3fb950;
+}
+[data-theme="dark"] .md-view-remarkable-toast-error {
+    border-color: #f85149;
+    color: #f85149;
 }
 `
 
@@ -499,6 +606,11 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 %s
 </script>`, string(copyButtonJS))
 
+	// reMarkable upload button script
+	remarkableButtonScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(remarkableButtonJS))
+
 	// Theme toggle script
 	themeToggleScript := `<script>
 (function() {
@@ -588,7 +700,7 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		fmHTML,
 		renderedHTML,
 		mermaidScript,
-		reloadScript+themeToggleScript+copyButtonScript,
+		reloadScript+themeToggleScript+copyButtonScript+remarkableButtonScript,
 	)
 
 	return htmlPage, nil
