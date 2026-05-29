@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -57,6 +58,7 @@ func NewServer(port int, browser string, noReload bool) (*Server, error) {
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/static/", s.handleStatic)
 	mux.HandleFunc("/file/", s.handleFileServing)
+	mux.HandleFunc("/upload-remarkable", s.handleUploadRemarkable)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 
 	s.httpServer = &http.Server{
@@ -456,6 +458,64 @@ func (s *Server) handleFileServing(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = f.Close() }()
 
 	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), f)
+}
+
+func (s *Server) handleUploadRemarkable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeErrorJSON(w, http.StatusMethodNotAllowed, "use POST")
+		return
+	}
+
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		s.writeErrorJSON(w, http.StatusBadRequest, "missing file parameter")
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		s.writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("invalid path: %v", err))
+		return
+	}
+
+	if _, err := os.Stat(absPath); err != nil {
+		s.writeErrorJSON(w, http.StatusNotFound, fmt.Sprintf("file not found: %s", absPath))
+		return
+	}
+
+	// Run remarquee upload md <file> --non-interactive
+	cmd := exec.Command("remarquee", "upload", "md", absPath, "--non-interactive") // #nosec G702 -- fixed args, file path is validated
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		log.Printf("reMarkable upload failed for %s: %s", absPath, errMsg)
+		s.writeErrorJSON(w, http.StatusInternalServerError, errMsg)
+		return
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	log.Printf("reMarkable upload succeeded for %s: %s", absPath, output)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"message": output,
+	})
+}
+
+func (s *Server) writeErrorJSON(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{
+		"status":  "error",
+		"message": message,
+	})
 }
 
 func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {
