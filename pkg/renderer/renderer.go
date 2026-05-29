@@ -573,10 +573,7 @@ func rewriteImagePaths(htmlContent string, mdFilePath string, port int) string {
 		// Build the new src: /file/<absolute-path-without-leading-slash>
 		// This avoids // in the URL which triggers ServeMux redirects.
 		// The handler re-adds the leading /.
-		pathForURL := resolved
-		if strings.HasPrefix(pathForURL, "/") {
-			pathForURL = pathForURL[1:]
-		}
+		pathForURL := strings.TrimPrefix(resolved, "/")
 		newSrc := "/file/" + pathForURL
 
 		return strings.Replace(imgTag, `src="`+src+`"`, `src="`+newSrc+`"`, 1)

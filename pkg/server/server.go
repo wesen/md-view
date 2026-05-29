@@ -512,19 +512,23 @@ func (s *Server) handleUploadRemarkable(w http.ResponseWriter, r *http.Request) 
 	log.Info().Str("file", absPath).Str("output", output).Msg("reMarkable upload succeeded")
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "ok",
 		"message": output,
-	})
+	}); err != nil {
+		log.Warn().Err(err).Msg("failed to encode upload response")
+	}
 }
 
 func (s *Server) writeErrorJSON(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "error",
 		"message": message,
-	})
+	}); err != nil {
+		log.Warn().Err(err).Msg("failed to encode error response")
+	}
 }
 
 func (s *Server) handleFavicon(w http.ResponseWriter, _ *http.Request) {

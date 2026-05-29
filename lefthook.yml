@@ -3,6 +3,9 @@ pre-commit:
     lint:
       glob: '*.go'
       run: make lint
+    glazed-lint:
+      glob: '*.go'
+      run: make glazed-lint
     test:
       glob: '*.go'
       run: make test
