@@ -39,6 +39,9 @@ var copyButtonJS []byte
 //go:embed static/remarkable-button.js
 var remarkableButtonJS []byte
 
+//go:embed static/toolbar-buttons.js
+var toolbarButtonsJS []byte
+
 // CSS returns the embedded GitHub-flavored CSS (light theme).
 func CSS() []byte {
 	return defaultCSS
@@ -67,6 +70,11 @@ func CopyButtonJS() []byte {
 // RemarkableButtonJS returns the embedded reMarkable upload button script.
 func RemarkableButtonJS() []byte {
 	return remarkableButtonJS
+}
+
+// ToolbarButtonsJS returns the embedded toolbar buttons script.
+func ToolbarButtonsJS() []byte {
+	return toolbarButtonsJS
 }
 
 // ChromaCSS returns the CSS for syntax highlighting.
@@ -377,6 +385,34 @@ func themeCSS(dark bool) string {
     opacity: 1;
     color: #24292e;
 }
+/* Toolbar buttons (copy path, download) */
+.md-view-toolbar-btn {
+    position: fixed;
+    top: 12px;
+    z-index: 100;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #656d76;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.md-view-toolbar-btn:hover {
+    opacity: 1;
+    color: #24292e;
+}
+.md-view-toolbar-btn-success {
+    color: #1a7f37 !important;
+    opacity: 1 !important;
+}
+.md-view-copy-path-btn { right: 160px; }
+.md-view-download-btn { right: 120px; }
 .md-view-remarkable-btn:disabled {
     cursor: wait;
     opacity: 0.9 !important;
@@ -470,6 +506,17 @@ func themeCSS(dark bool) string {
 }
 [data-theme="dark"] .md-view-remarkable-btn-error {
     color: #f85149 !important;
+}
+[data-theme="dark"] .md-view-toolbar-btn {
+    background: #21262d;
+    border-color: #30363d;
+    color: #8b949e;
+}
+[data-theme="dark"] .md-view-toolbar-btn:hover {
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-toolbar-btn-success {
+    color: #3fb950 !important;
 }
 [data-theme="dark"] .md-view-remarkable-toast {
     background: #21262d;
@@ -611,6 +658,11 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 %s
 </script>`, string(remarkableButtonJS))
 
+	// Toolbar buttons (copy path, download)
+	toolbarButtonsScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(toolbarButtonsJS))
+
 	// Theme toggle script
 	themeToggleScript := `<script>
 (function() {
@@ -700,7 +752,7 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		fmHTML,
 		renderedHTML,
 		mermaidScript,
-		reloadScript+themeToggleScript+copyButtonScript+remarkableButtonScript,
+		reloadScript+themeToggleScript+copyButtonScript+remarkableButtonScript+toolbarButtonsScript,
 	)
 
 	return htmlPage, nil

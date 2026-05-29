@@ -404,6 +404,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "/static/remarkable-button.js":
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write(renderer.RemarkableButtonJS())
+	case "/static/toolbar-buttons.js":
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write(renderer.ToolbarButtonsJS())
 	default:
 		http.NotFound(w, r)
 	}
