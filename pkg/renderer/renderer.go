@@ -33,6 +33,15 @@ var mermaidInitJS []byte
 //go:embed static/mermaid.min.js
 var mermaidJS []byte
 
+//go:embed static/copy-button.js
+var copyButtonJS []byte
+
+//go:embed static/remarkable-button.js
+var remarkableButtonJS []byte
+
+//go:embed static/toolbar-buttons.js
+var toolbarButtonsJS []byte
+
 // CSS returns the embedded GitHub-flavored CSS (light theme).
 func CSS() []byte {
 	return defaultCSS
@@ -51,6 +60,21 @@ func ReloadJS() []byte {
 // MermaidJS returns the embedded mermaid.js library.
 func MermaidJS() []byte {
 	return mermaidJS
+}
+
+// CopyButtonJS returns the embedded copy-to-clipboard script.
+func CopyButtonJS() []byte {
+	return copyButtonJS
+}
+
+// RemarkableButtonJS returns the embedded reMarkable upload button script.
+func RemarkableButtonJS() []byte {
+	return remarkableButtonJS
+}
+
+// ToolbarButtonsJS returns the embedded toolbar buttons script.
+func ToolbarButtonsJS() []byte {
+	return toolbarButtonsJS
 }
 
 // ChromaCSS returns the CSS for syntax highlighting.
@@ -338,6 +362,106 @@ func themeCSS(dark bool) string {
 .md-view-theme-toggle:hover {
     opacity: 1;
 }
+/* reMarkable upload button */
+.md-view-remarkable-btn {
+    position: fixed;
+    top: 12px;
+    right: 80px;
+    z-index: 100;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #656d76;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.md-view-remarkable-btn:hover {
+    opacity: 1;
+    color: #24292e;
+}
+/* Toolbar buttons (copy path, download) */
+.md-view-toolbar-btn {
+    position: fixed;
+    top: 12px;
+    z-index: 100;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    color: #656d76;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+.md-view-toolbar-btn:hover {
+    opacity: 1;
+    color: #24292e;
+}
+.md-view-toolbar-btn-success {
+    color: #1a7f37 !important;
+    opacity: 1 !important;
+}
+.md-view-copy-path-btn { right: 160px; }
+.md-view-download-btn { right: 120px; }
+.md-view-remarkable-btn:disabled {
+    cursor: wait;
+    opacity: 0.9 !important;
+}
+.md-view-remarkable-btn-loading svg {
+    animation: md-view-spin 0.8s linear infinite;
+}
+.md-view-remarkable-btn-success {
+    color: #1a7f37 !important;
+    opacity: 1 !important;
+}
+.md-view-remarkable-btn-error {
+    color: #cf222e !important;
+    opacity: 1 !important;
+}
+@keyframes md-view-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+/* reMarkable upload status toast */
+.md-view-remarkable-toast {
+    position: fixed;
+    top: 50px;
+    right: 12px;
+    z-index: 101;
+    background: #f6f8fa;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    color: #24292e;
+    max-width: 400px;
+    word-break: break-word;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+.md-view-remarkable-toast-success {
+    border-color: #1a7f37;
+    color: #1a7f37;
+}
+.md-view-remarkable-toast-error {
+    border-color: #cf222e;
+    color: #cf222e;
+}
+.md-view-remarkable-toast-loading {
+    color: #656d76;
+}
+.md-view-remarkable-toast-loading svg {
+    animation: md-view-spin 0.8s linear infinite;
+}
 `
 
 	darkOverrides := `
@@ -369,9 +493,91 @@ func themeCSS(dark bool) string {
     border-color: #30363d;
     color: #c9d1d9;
 }
+[data-theme="dark"] .md-view-remarkable-btn {
+    background: #21262d;
+    border-color: #30363d;
+    color: #8b949e;
+}
+[data-theme="dark"] .md-view-remarkable-btn:hover {
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-remarkable-btn-success {
+    color: #3fb950 !important;
+}
+[data-theme="dark"] .md-view-remarkable-btn-error {
+    color: #f85149 !important;
+}
+[data-theme="dark"] .md-view-toolbar-btn {
+    background: #21262d;
+    border-color: #30363d;
+    color: #8b949e;
+}
+[data-theme="dark"] .md-view-toolbar-btn:hover {
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-toolbar-btn-success {
+    color: #3fb950 !important;
+}
+[data-theme="dark"] .md-view-remarkable-toast {
+    background: #21262d;
+    border-color: #30363d;
+    color: #c9d1d9;
+}
+[data-theme="dark"] .md-view-remarkable-toast-success {
+    border-color: #3fb950;
+    color: #3fb950;
+}
+[data-theme="dark"] .md-view-remarkable-toast-error {
+    border-color: #f85149;
+    color: #f85149;
+}
 `
 
 	return light + darkOverrides
+}
+
+// rewriteImagePaths rewrites relative <img src="..."> paths to absolute /file/ URLs
+// so the browser can fetch them from the server's /file/ handler.
+// mdFilePath is the absolute path of the markdown file being rendered.
+// port is the server's HTTP port.
+var reImgSrc = regexp.MustCompile(`<img\s[^>]*src="([^"]+)"`)
+
+func rewriteImagePaths(htmlContent string, mdFilePath string, port int) string {
+	fileDir := filepath.Dir(mdFilePath)
+
+	return reImgSrc.ReplaceAllStringFunc(htmlContent, func(imgTag string) string {
+		submatch := reImgSrc.FindStringSubmatch(imgTag)
+		if len(submatch) < 2 {
+			return imgTag
+		}
+		src := submatch[1]
+
+		// Skip absolute URLs, data URIs, anchors, and scheme-only
+		if strings.HasPrefix(src, "http://") ||
+			strings.HasPrefix(src, "https://") ||
+			strings.HasPrefix(src, "data:") ||
+			strings.HasPrefix(src, "#") ||
+			strings.HasPrefix(src, "//") {
+			return imgTag
+		}
+
+		// Skip paths that are already /file/ URLs
+		if strings.HasPrefix(src, "/file/") {
+			return imgTag
+		}
+
+		// Resolve relative path against the markdown file's directory
+		resolved := filepath.Join(fileDir, src)
+		resolved = filepath.Clean(resolved)
+
+		// Build the new src: /file/<absolute-path-without-leading-slash>
+		// This avoids // in the URL which triggers ServeMux redirects.
+		// The handler re-adds the leading /.
+		pathForURL := strings.TrimPrefix(resolved, "/")
+		newSrc := "/file/" + pathForURL
+
+		return strings.Replace(imgTag, `src="`+src+`"`, `src="`+newSrc+`"`, 1)
+	})
 }
 
 // Render reads a markdown file and returns full HTML.
@@ -408,6 +614,10 @@ func Render(filePath string, opts Options) (string, error) {
 		return "", fmt.Errorf("cannot convert markdown: %w", err)
 	}
 
+	// Rewrite relative image paths to /file/<abs-path> so the browser
+	// can load them through the server's /file/ handler.
+	renderedHTML := rewriteImagePaths(buf.String(), filePath, opts.Port)
+
 	chromaCSS, err := ChromaCSSBoth()
 	if err != nil {
 		return "", err
@@ -434,6 +644,21 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 <script>
 %s
 </script>`, opts.Port, string(mermaidInitJS))
+
+	// Copy-to-clipboard script
+	copyButtonScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(copyButtonJS))
+
+	// reMarkable upload button script
+	remarkableButtonScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(remarkableButtonJS))
+
+	// Toolbar buttons (copy path, download)
+	toolbarButtonsScript := fmt.Sprintf(`<script>
+%s
+</script>`, string(toolbarButtonsJS))
 
 	// Theme toggle script
 	themeToggleScript := `<script>
@@ -522,9 +747,9 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		darkStyle,
 		themeToggleBtn,
 		fmHTML,
-		buf.String(),
+		renderedHTML,
 		mermaidScript,
-		reloadScript+themeToggleScript,
+		reloadScript+themeToggleScript+copyButtonScript+remarkableButtonScript+toolbarButtonsScript,
 	)
 
 	return htmlPage, nil

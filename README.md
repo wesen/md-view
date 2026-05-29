@@ -1,5 +1,9 @@
 # md-view
 
+<p align="center">
+  <img src="docs/images/hero.jpg" alt="md-view — a markdown viewer that just works" width="400">
+</p>
+
 > A markdown viewer that just works. One command, beautiful rendering, browser opens automatically.
 
 `md-view` is a lightweight daemon that renders Markdown files as GitHub-flavored HTML and opens them in your browser. It runs in the background, auto-starts when you need it, and watches your files for live reload.

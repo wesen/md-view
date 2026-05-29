@@ -12,6 +12,10 @@ GOLANGCI_LINT_BIN ?= $(CURDIR)/.bin/golangci-lint
 GOLANGCI_LINT_ARGS ?= --timeout=5m ./cmd/... ./pkg/...
 LINT_DIRS := $(shell git ls-files '*.go' | grep -vE '(^|/)ttmp/|(^|/)testdata/' | xargs -r -n1 dirname | sed 's#^#./#' | sort -u)
 GOSEC_EXCLUDE_DIRS := -exclude-dir=.history -exclude-dir=testdata -exclude-dir=ttmp
+GLAZED_LINT_BIN ?= /tmp/glazed-lint
+GLAZED_LINT_PKG ?= github.com/go-go-golems/glazed/cmd/tools/glazed-lint
+GLAZED_VERSION ?= $(shell GOWORK=off go list -m -f '{{.Version}}' github.com/go-go-golems/glazed 2>/dev/null)
+GLAZED_LINT_FLAGS ?= -glazedclilint.allow-paths=pkg/commands/,pkg/daemon/daemon.go,pkg/server/server.go
 
 build:
 	GOWORK=off go generate ./...
@@ -34,6 +38,19 @@ lint: golangci-lint-install
 lintmax: golangci-lint-install
 	GOWORK=off $(GOLANGCI_LINT_BIN) config verify
 	GOWORK=off $(GOLANGCI_LINT_BIN) run -v --max-same-issues=100 $(GOLANGCI_LINT_ARGS)
+
+glazed-lint-build:
+	@echo "Building glazed-lint from Glazed module..."
+	@if [ -n "$(GLAZED_VERSION)" ] && [ "$(GLAZED_VERSION)" != "(devel)" ]; then \
+		echo "Installing $(GLAZED_LINT_PKG)@$(GLAZED_VERSION)"; \
+		GOBIN=$(dir $(GLAZED_LINT_BIN)) GOWORK=off go install $(GLAZED_LINT_PKG)@$(GLAZED_VERSION); \
+	else \
+		echo "Installing $(GLAZED_LINT_PKG) from workspace/module"; \
+		GOBIN=$(dir $(GLAZED_LINT_BIN)) go install $(GLAZED_LINT_PKG); \
+	fi
+
+glazed-lint: glazed-lint-build
+	go vet -vettool=$(GLAZED_LINT_BIN) $(GLAZED_LINT_FLAGS) ./cmd/... ./pkg/...
 
 gosec:
 	GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec@latest

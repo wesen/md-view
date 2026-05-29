@@ -1,11 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"os"
@@ -17,21 +17,26 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-go-golems/logcopter/pkg/logcopter"
+
 	"github.com/go-go-golems/md-view/pkg/daemon"
 	"github.com/go-go-golems/md-view/pkg/protocol"
 	"github.com/go-go-golems/md-view/pkg/renderer"
 	"github.com/go-go-golems/md-view/pkg/watcher"
 )
 
+var log = logcopter.Package("md-view.server")
+
 // Server is the md-view HTTP + Unix socket server.
 type Server struct {
-	httpServer *http.Server
-	port       int
-	watcher    *watcher.FileWatcher
-	mu         sync.Mutex
-	sseClients map[string]map[<-chan struct{}]struct{} // file path → set of watch channels
-	browser    string                                  // override browser command
-	noReload   bool                                    // disable live reload
+	httpServer  *http.Server
+	port        int
+	watcher     *watcher.FileWatcher
+	mu          sync.Mutex
+	sseClients  map[string]map[<-chan struct{}]struct{} // file path → set of watch channels
+	browser     string                                  // override browser command
+	noReload    bool                                    // disable live reload
+	allowedDirs map[string]bool                         // directories allowed for /file/ serving
 }
 
 // NewServer creates a new Server bound to localhost on the given port (0 = random).
@@ -42,11 +47,12 @@ func NewServer(port int, browser string, noReload bool) (*Server, error) {
 	}
 
 	s := &Server{
-		port:       port,
-		watcher:    fw,
-		sseClients: make(map[string]map[<-chan struct{}]struct{}),
-		browser:    browser,
-		noReload:   noReload,
+		port:        port,
+		watcher:     fw,
+		sseClients:  make(map[string]map[<-chan struct{}]struct{}),
+		browser:     browser,
+		noReload:    noReload,
+		allowedDirs: make(map[string]bool),
 	}
 
 	mux := http.NewServeMux()
@@ -54,6 +60,8 @@ func NewServer(port int, browser string, noReload bool) (*Server, error) {
 	mux.HandleFunc("/raw", s.handleRaw)
 	mux.HandleFunc("/events", s.handleEvents)
 	mux.HandleFunc("/static/", s.handleStatic)
+	mux.HandleFunc("/file/", s.handleFileServing)
+	mux.HandleFunc("/upload-remarkable", s.handleUploadRemarkable)
 	mux.HandleFunc("/favicon.ico", s.handleFavicon)
 
 	s.httpServer = &http.Server{
@@ -109,14 +117,14 @@ func (s *Server) Start(ctx context.Context) error {
 	go func() {
 		select {
 		case <-sigCh:
-			log.Println("Received shutdown signal")
+			log.Info().Msg("Received shutdown signal")
 			s.Shutdown()
 		case <-ctx.Done():
 			s.Shutdown()
 		}
 	}()
 
-	log.Printf("md-view server listening on http://localhost:%d (socket: %s)", s.port, socketPath)
+	log.Info().Int("port", s.port).Str("socket", socketPath).Msg("md-view server listening")
 
 	// Serve HTTP
 	errCh := make(chan error, 1)
@@ -158,7 +166,7 @@ func (s *Server) acceptUnixConnections(ctx context.Context, listener net.Listene
 			case <-ctx.Done():
 				return
 			default:
-				log.Printf("Unix socket accept error: %v", err)
+				log.Warn().Err(err).Msg("Unix socket accept error")
 				continue
 			}
 		}
@@ -267,6 +275,21 @@ func (s *Server) handleRender(w http.ResponseWriter, r *http.Request) {
 
 	// Check for theme parameter
 	dark := r.URL.Query().Get("theme") == "dark"
+
+	// Register the file's directory and all ancestor directories as allowed
+	// for /file/ serving. This is necessary because markdown can reference
+	// images with ../ paths that resolve outside the immediate parent dir.
+	s.mu.Lock()
+	dir := filepath.Dir(absPath)
+	for {
+		s.allowedDirs[dir] = true
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	s.mu.Unlock()
 
 	opts := renderer.Options{
 		File:     absPath,
@@ -378,8 +401,133 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "/static/mermaid.min.js":
 		w.Header().Set("Content-Type", "application/javascript")
 		_, _ = w.Write(renderer.MermaidJS())
+	case "/static/copy-button.js":
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write(renderer.CopyButtonJS())
+	case "/static/remarkable-button.js":
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write(renderer.RemarkableButtonJS())
+	case "/static/toolbar-buttons.js":
+		w.Header().Set("Content-Type", "application/javascript")
+		_, _ = w.Write(renderer.ToolbarButtonsJS())
 	default:
 		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) handleFileServing(w http.ResponseWriter, r *http.Request) {
+	// URL path: /file/<path-without-leading-slash>
+	// e.g. /file/tmp/md-test/images/diagram.png (absolute path was /tmp/md-test/...)
+	filePath := strings.TrimPrefix(r.URL.Path, "/file/")
+	if filePath == "" {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Re-add the leading / stripped to avoid // in URLs
+	if !strings.HasPrefix(filePath, "/") {
+		filePath = "/" + filePath
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+
+	// Security: only serve files under an allowed directory
+	s.mu.Lock()
+	allowed := false
+	for dir := range s.allowedDirs {
+		if strings.HasPrefix(absPath, dir+string(filepath.Separator)) || absPath == dir {
+			allowed = true
+			break
+		}
+	}
+	s.mu.Unlock()
+
+	if !allowed {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	info, err := os.Stat(absPath)
+	if err != nil || !info.Mode().IsRegular() {
+		http.NotFound(w, r)
+		return
+	}
+
+	// Read and serve the file directly (don't use http.ServeFile — it
+	// redirects to "clean" the URL, breaking absolute paths with leading /).
+	f, err := os.Open(absPath)
+	if err != nil {
+		http.Error(w, "cannot open file", http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	http.ServeContent(w, r, filepath.Base(absPath), info.ModTime(), f)
+}
+
+func (s *Server) handleUploadRemarkable(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		s.writeErrorJSON(w, http.StatusMethodNotAllowed, "use POST")
+		return
+	}
+
+	filePath := r.URL.Query().Get("file")
+	if filePath == "" {
+		s.writeErrorJSON(w, http.StatusBadRequest, "missing file parameter")
+		return
+	}
+
+	absPath, err := filepath.Abs(filePath)
+	if err != nil {
+		s.writeErrorJSON(w, http.StatusBadRequest, fmt.Sprintf("invalid path: %v", err))
+		return
+	}
+
+	if _, err := os.Stat(absPath); err != nil {
+		s.writeErrorJSON(w, http.StatusNotFound, fmt.Sprintf("file not found: %s", absPath))
+		return
+	}
+
+	// Run remarquee upload md <file> --non-interactive
+	cmd := exec.Command("remarquee", "upload", "md", absPath, "--non-interactive") // #nosec G702 -- fixed args, file path is validated
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		log.Error().Str("file", absPath).Str("error", errMsg).Msg("reMarkable upload failed")
+		s.writeErrorJSON(w, http.StatusInternalServerError, errMsg)
+		return
+	}
+
+	output := strings.TrimSpace(stdout.String())
+	log.Info().Str("file", absPath).Str("output", output).Msg("reMarkable upload succeeded")
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "ok",
+		"message": output,
+	}); err != nil {
+		log.Warn().Err(err).Msg("failed to encode upload response")
+	}
+}
+
+func (s *Server) writeErrorJSON(w http.ResponseWriter, code int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":  "error",
+		"message": message,
+	}); err != nil {
+		log.Warn().Err(err).Msg("failed to encode error response")
 	}
 }
 
@@ -406,7 +554,7 @@ func (s *Server) openBrowser(url string) {
 		}
 	}
 	if browser == "" {
-		log.Println("Warning: no browser found (set $BROWSER)")
+		log.Warn().Msg("no browser found (set $BROWSER)")
 		return
 	}
 
@@ -422,7 +570,7 @@ func (s *Server) openBrowser(url string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		log.Printf("Cannot open browser: %v", err)
+		log.Warn().Err(err).Msg("Cannot open browser")
 	}
 }
 
@@ -441,7 +589,7 @@ func (s *Server) openBrowserWith(url, browserCmd string) {
 	cmd.Stdout = io.Discard
 	cmd.Stderr = io.Discard
 	if err := cmd.Start(); err != nil {
-		log.Printf("Cannot open browser %q: %v", browserCmd, err)
+		log.Warn().Str("browser", browserCmd).Err(err).Msg("Cannot open browser")
 	}
 }
 
