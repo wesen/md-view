@@ -580,17 +580,35 @@ func rewriteImagePaths(htmlContent string, mdFilePath string, port int) string {
 	})
 }
 
-// Render reads a markdown file and returns full HTML.
-func Render(filePath string, opts Options) (string, error) {
+// BodyHTML is the rendered fragment produced by RenderBody: the frontmatter
+// block, the rendered Markdown body, and the resolved page title. It contains
+// no page chrome (no <html>/<head>, no CSS, no <script>) — the caller assembles
+// those. This is what the Wails frontend swaps into #content.innerHTML.
+type BodyHTML struct {
+	// Frontmatter is the HTML for the collapsible frontmatter <details> block,
+	// or "" when the file has no frontmatter.
+	Frontmatter string
+	// Body is the rendered Markdown HTML, with relative image paths rewritten
+	// to /file/<abs-path> URLs.
+	Body string
+	// Title is the resolved page title: opts.Title, else the frontmatter Title,
+	// else the file's base name. It is NOT prefixed with "md-view: ".
+	Title string
+}
+
+// RenderBody reads a markdown file and renders it to a body fragment
+// (frontmatter HTML + body HTML + title), without any page chrome. Both the
+// desktop app (via App.openPath) and the legacy full-page Render use it.
+func RenderBody(filePath string, opts Options) (*BodyHTML, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		return "", fmt.Errorf("cannot read file %s: %w", filePath, err)
+		return nil, fmt.Errorf("cannot read file %s: %w", filePath, err)
 	}
 
 	fm, body, hasFM := extractFrontmatter(data)
 
 	// Always use "github" style for goldmark highlighting — both light and dark
-	// chroma CSS are included in the page so the toggle works
+	// chroma CSS are included so the theme toggle works.
 	chromaStyle := "github"
 
 	md := goldmark.New(
@@ -611,12 +629,45 @@ func Render(filePath string, opts Options) (string, error) {
 
 	var buf bytes.Buffer
 	if err := md.Convert(body, &buf); err != nil {
-		return "", fmt.Errorf("cannot convert markdown: %w", err)
+		return nil, fmt.Errorf("cannot convert markdown: %w", err)
 	}
 
-	// Rewrite relative image paths to /file/<abs-path> so the browser
-	// can load them through the server's /file/ handler.
+	// Rewrite relative image paths to /file/<abs-path>. The Port argument is
+	// unused by rewriteImagePaths (it builds port-independent /file/ URLs) but
+	// is kept for Options API compatibility.
 	renderedHTML := rewriteImagePaths(buf.String(), filePath, opts.Port)
+
+	// Resolve the page title.
+	title := opts.Title
+	if title == "" && hasFM && fm.Title != "" {
+		title = fm.Title
+	}
+	if title == "" {
+		title = filepath.Base(filePath)
+	}
+
+	// Frontmatter section (empty string if none).
+	fmHTML := ""
+	if hasFM {
+		fmHTML = formatFrontmatterHTML(fm)
+	}
+
+	return &BodyHTML{
+		Frontmatter: fmHTML,
+		Body:        renderedHTML,
+		Title:       title,
+	}, nil
+}
+
+// Render reads a markdown file and returns a full standalone HTML document.
+// It is a thin assembler over RenderBody: it takes the body fragment and wraps
+// it with page chrome (CSS, scripts, mermaid, reload). Used by the legacy HTTP
+// server (pkg/server); the desktop app calls RenderBody directly.
+func Render(filePath string, opts Options) (string, error) {
+	body, err := RenderBody(filePath, opts)
+	if err != nil {
+		return "", err
+	}
 
 	chromaCSS, err := ChromaCSSBoth()
 	if err != nil {
@@ -684,21 +735,11 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 })();
 </script>`
 
-	// Page title
-	title := opts.Title
-	if title == "" && hasFM && fm.Title != "" {
-		title = fm.Title
-	}
-	if title == "" {
-		title = filepath.Base(filePath)
-	}
-	title = "md-view: " + title
+	// Page title (RenderBody resolved the title; add the app prefix).
+	title := "md-view: " + body.Title
 
-	// Frontmatter section
-	fmHTML := ""
-	if hasFM {
-		fmHTML = formatFrontmatterHTML(fm)
-	}
+	// Frontmatter section (RenderBody already formatted it).
+	fmHTML := body.Frontmatter
 
 	// Dark CSS (always included — activated by data-theme="dark")
 	darkStyle := fmt.Sprintf(`<style>
@@ -747,7 +788,7 @@ new MDSReloader("http://localhost:%d/events?file=%s");
 		darkStyle,
 		themeToggleBtn,
 		fmHTML,
-		renderedHTML,
+		body.Body,
 		mermaidScript,
 		reloadScript+themeToggleScript+copyButtonScript+remarkableButtonScript+toolbarButtonsScript,
 	)

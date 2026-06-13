@@ -17,12 +17,12 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 1 — Reuse the renderer (RenderBody refactor, DR-3)
 
-- [ ] 1.1 Add `BodyHTML` type + `RenderBody(filePath, opts) (*BodyHTML, error)` to `pkg/renderer` (frontmatter HTML + body HTML + title), reusing `extractFrontmatter`, goldmark convert, `rewriteImagePaths`
-- [ ] 1.2 Decide fate of full-page `Render` (keep as `ExportHTML` or remove — since `pkg/server` is deleted in cutover)
-- [ ] 1.3 Port `renderer_test.go` assertions to `RenderBody`; keep them green
-- [ ] 1.4 Add `OpenFile`/`OpenFileAtPath`/`openPath` bound methods on `App`; call `renderer.RenderBody`
-- [ ] 1.5 Verify: window opens a `.md` file and renders HTML
-- [ ] 1.6 Commit
+- [x] 1.1 Add `BodyHTML` type + `RenderBody(filePath, opts) (*BodyHTML, error)` to `pkg/renderer` (frontmatter HTML + body HTML + title), reusing `extractFrontmatter`, goldmark convert, `rewriteImagePaths`
+- [x] 1.2 `Render` refactored to a thin assembler over `RenderBody` (kept so `pkg/server` compiles until Phase 7 cutover)
+- [x] 1.3 Added `TestRenderBody` + `TestRenderBodyWithFrontmatter`; all 8 renderer tests green
+- [x] 1.4 `OpenFile`/`OpenFileAtPath`/`openPath` bound methods on `App` call `renderer.RenderBody` (return `string` HTML fragment; `FileResult` deferred)
+- [x] 1.5 Verify: window renders a `.md` file (Playwright via wails dev browser mode: h1/bold/table/chroma all present)
+- [x] 1.6 Commit
 
 ## Phase 2 — Assets, CSS, Chroma (DR-4)
 

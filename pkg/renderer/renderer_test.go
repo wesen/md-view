@@ -270,6 +270,68 @@ func TestRenderWithMermaidBlock(t *testing.T) {
 	}
 }
 
+func TestRenderBody(t *testing.T) {
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "test.md")
+	content := "# Hello\n\nThis is **bold** text.\n"
+	if err := os.WriteFile(mdFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := RenderBody(mdFile, Options{})
+	if err != nil {
+		t.Fatalf("RenderBody() error = %v", err)
+	}
+
+	// Title should be the filename, NOT prefixed with "md-view: "
+	if body.Title != "test.md" {
+		t.Errorf("Title = %q, want %q", body.Title, "test.md")
+	}
+
+	// Body should contain rendered markdown, not the page chrome
+	for _, want := range []string{"<h1>Hello</h1>", "<strong>bold</strong>"} {
+		if !contains(body.Body, want) {
+			t.Errorf("Body missing %q, got: %s", want, body.Body)
+		}
+	}
+
+	// A body fragment must NOT contain page chrome
+	for _, unwanted := range []string{"<!DOCTYPE", "<html", "<head", "md-view:", "chroma"} {
+		if contains(body.Body, unwanted) {
+			t.Errorf("Body should not contain page chrome %q", unwanted)
+		}
+	}
+
+	// No frontmatter → empty Frontmatter field
+	if body.Frontmatter != "" {
+		t.Errorf("Frontmatter = %q, want empty", body.Frontmatter)
+	}
+}
+
+func TestRenderBodyWithFrontmatter(t *testing.T) {
+	tmpDir := t.TempDir()
+	mdFile := filepath.Join(tmpDir, "fm.md")
+	content := "---\nTitle: My Doc\nStatus: draft\n---\n# Content\n"
+	if err := os.WriteFile(mdFile, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	body, err := RenderBody(mdFile, Options{})
+	if err != nil {
+		t.Fatalf("RenderBody() error = %v", err)
+	}
+
+	if body.Title != "My Doc" {
+		t.Errorf("Title = %q, want %q (from frontmatter)", body.Title, "My Doc")
+	}
+	if !contains(body.Frontmatter, "md-view-frontmatter") {
+		t.Errorf("Frontmatter should contain the details block, got: %s", body.Frontmatter)
+	}
+	if contains(body.Body, "---") {
+		t.Errorf("Body should strip frontmatter delimiters, got: %s", body.Body)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsHelper(s, substr))
 }

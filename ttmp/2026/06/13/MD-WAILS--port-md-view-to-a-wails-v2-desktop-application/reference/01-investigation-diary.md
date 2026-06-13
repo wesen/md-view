@@ -216,3 +216,71 @@ So Phase 0's install steps were already satisfied; only scaffolding remained.
 - Commit (this step): see `git log` for "feat(MD-WAILS): scaffold Wails v2 app (Phase 0)".
 - `wails dev` build tag: `-tags webkit2_41` (webkit2gtk-4.1 present, 4.0 absent).
 - Embed: `//go:embed all:frontend/dist` in `main.go`.
+
+## Step 4: Phase 1 — RenderBody refactor + wire the renderer to the window
+
+Phase 1's goal was to make the Wails window actually render a Markdown file, by reusing md-view's existing Goldmark renderer through a new fragment-returning `RenderBody`, and wiring it to a bound `App.openPath`.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3 — "Add detailed tasks … work on them one by one, keeping a detailed diary … committing at appropriate intervals.")
+
+**Assistant interpretation:** Execute Phase 1 of the task list: refactor `pkg/renderer` to expose a chrome-free body fragment, keep the legacy full-page `Render` delegating to it (so `pkg/server` keeps compiling until the Phase 7 cutover), and make `App.OpenFile`/`OpenFileAtPath` render a real file.
+
+**Inferred user intent:** Prove the renderer→Wails-bridge data path end to end (the core of the whole port) before adding styling, live reload, and the single-instance CLI dispatch.
+
+### What I did
+
+- **Added `BodyHTML` + `RenderBody`** to `pkg/renderer/renderer.go`. `RenderBody(filePath, opts) (*BodyHTML, error)` returns `{Frontmatter, Body, Title}` — the read→frontmatter→Goldmark→`rewriteImagePaths`→title core, with no `<html>`/`<head>`/CSS/`<script>`.
+- **Refactored `Render`** to be a thin assembler over `RenderBody` (it calls it, then wraps the fragment with page chrome). This keeps `pkg/server` (the only `Render` consumer) compiling through the transition, per DR-3.
+- **Added 2 `RenderBody` tests** (`TestRenderBody`, `TestRenderBodyWithFrontmatter`) covering title resolution, body content, the "no page chrome" invariant, and frontmatter formatting.
+- **Wired `App.OpenFile`/`OpenFileAtPath`/`openPath`** in `app.go`: native file dialog (`runtime.OpenFileDialog`) → `renderer.RenderBody` → set `currentFile` + `runtime.WindowSetTitle` → return `frontmatter + "\n" + body` as the HTML string. Kept the return type as `string` (not the design's `FileResult` struct) to stay compatible with the copied demo frontend, which does `.then(html => showContent(html))`. `FileResult` can be introduced later if the frontend is upgraded.
+- **Verified end to end** via `wails dev`'s browser mode + Playwright: navigated to `http://localhost:34115`, polled for `window.go.main.App` readiness, called `OpenFileAtPath('/tmp/md-view-test.md')`, and asserted the returned HTML contained `<h1>Hello md-view</h1>`, `<strong>bold</strong>`, `<table>`, and `chroma` classes. All passed.
+
+### Why
+
+- Splitting `Render` into `RenderBody` + assembler is the linchpin of DR-3: the WebView owns page chrome (stable `index.html`), and only the content fragment is swapped per file. This makes theme toggling, Mermaid re-init, and asset caching far simpler than full-page reloads.
+- Keeping `Render` delegating (rather than deleting it) lets `pkg/server` keep compiling during the transition, so `go build ./...` and `go test ./...` stay green until the Phase 7 cutover deletes `pkg/server`.
+
+### What worked
+
+- All 8 renderer tests green after the refactor (6 existing `Render`-based + 2 new `RenderBody`); the refactor was behavior-preserving for `Render`.
+- `gofmt` clean; `go build -tags webkit2_41 ./...` builds the new root main, the old `cmd/md-view`, and all packages together — the two-`main` coexistence still holds.
+- Wails dev browser mode is an excellent verification tool: it exposes bound Go methods at `window.go.main.App.*` over HTTP, so I can drive the app from Playwright without simulating native dialog clicks.
+
+### What didn't work
+
+- **First refactor edit failed** ("Could not find edits[0]"): I mistyped the Goldmark options block's closing-paren nesting in the `oldText`. Fixed by re-reading the exact bytes with `sed -n | cat -A` (tabs show as `^I`) and reconstructing the `oldText` precisely. Lesson: for multi-line Go edits with nested calls, always source the exact whitespace from `cat -A` rather than transcribing by eye.
+- Minor: `favicon.ico` 404 in the console (no favicon served). Harmless; deferred to a later cleanup.
+
+### What I learned
+
+- `rewriteImagePaths`'s `port` parameter is genuinely unused (it builds port-independent `/file/...` URLs) — confirmed by reading the body, so `RenderBody` passes `opts.Port` through purely for `Options` API compatibility. This matters for Phase 4 (image serving needs no port).
+- The Wails binding contract for a `(string, error)` Go method is a JS `Promise<string>`; the demo frontend already consumes it as a plain string. Changing the return to a struct would require regenerating bindings and updating the frontend — deferred.
+
+### What was tricky to build
+
+- **Preserving `Render`'s exact output while extracting its core.** The title resolution and frontmatter formatting lived mid-function in `Render`; moving them into `RenderBody` required updating every downstream reference in `Render` (`title`, `fmHTML`, `renderedHTML` → `body.Title`, `body.Frontmatter`, `body.Body`). Verified by the unchanged `Render` tests passing.
+- **The edit-tool whitespace sensitivity.** Documented above.
+
+### What warrants a second pair of eyes
+
+- The decision to return a plain `string` from `OpenFile`/`OpenFileAtPath` (vs the design's `FileResult{HTML,Path,Title}`). It works and matches the frontend today, but if we later want path/title without extra round-trips, `FileResult` is better. Acceptable to evolve.
+- `Render` is now a thin assembler kept alive only for `pkg/server`. Confirm we still want it deleted at cutover (Phase 7) vs. kept as an `ExportHTML` helper.
+
+### What should be done in the future
+
+- Phase 2: swap the demo's `style.css`/`chroma.css` for md-view's `base.css` + generated dual-theme Chroma CSS so content looks like the real md-view.
+- Add a favicon (or a 204 handler) to silence the console 404.
+
+### Code review instructions
+
+- `pkg/renderer/renderer.go`: `BodyHTML` + `RenderBody` (new), `Render` (now delegates).
+- `pkg/renderer/renderer_test.go`: `TestRenderBody`, `TestRenderBodyWithFrontmatter` (new).
+- `app.go`: `OpenFile`, `OpenFileAtPath`, `openPath` (implemented).
+- Validate: `go test ./pkg/renderer -count=1`; `wails dev -tags webkit2_41` then call `window.go.main.App.OpenFileAtPath('/tmp/md-view-test.md')` in the browser.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): RenderBody refactor + wire renderer to window (Phase 1)".
+- Verification artifact: `.playwright-mcp/phase1-render.png` (gitignored).

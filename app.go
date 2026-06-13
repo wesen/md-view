@@ -2,6 +2,11 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+
+	"github.com/go-go-golems/md-view/pkg/renderer"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails-bound application backend. Its public methods are
@@ -40,15 +45,53 @@ func (a *App) Shutdown(_ context.Context) {
 
 // --- Bound methods (stubs for Phase 0; implemented in later phases) ---
 
-// OpenFile shows a native file dialog and returns the rendered HTML.
-// Phase 0 stub: returns empty (no renderer wired yet).
+// OpenFile shows a native file dialog and returns the rendered HTML fragment
+// (frontmatter block + body). Returns "" if the user cancels.
 func (a *App) OpenFile() (string, error) {
-	return "", nil
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Open Markdown File",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Markdown Files", Pattern: "*.md;*.markdown;*.mdown;*.mkd"},
+			{DisplayName: "All Files", Pattern: "*.*"},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("file dialog error: %w", err)
+	}
+	if path == "" {
+		return "", nil // user cancelled
+	}
+	return a.openPath(path)
 }
 
-// OpenFileAtPath opens a specific Markdown file by absolute path.
-func (a *App) OpenFileAtPath(_ string) (string, error) {
-	return "", nil
+// OpenFileAtPath opens a specific Markdown file by absolute path and returns
+// the rendered HTML fragment. Used by recent-files clicks and drag-and-drop.
+func (a *App) OpenFileAtPath(path string) (string, error) {
+	return a.openPath(path)
+}
+
+// openPath is the shared implementation: resolve → render → set state → set title.
+// It returns the HTML fragment the frontend swaps into #content.innerHTML.
+// Phase 4 will add the image-serving allow-list here; Phase 3 adds file watching.
+func (a *App) openPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve path: %w", err)
+	}
+
+	body, err := renderer.RenderBody(abs, renderer.Options{})
+	if err != nil {
+		return "", err
+	}
+
+	a.currentFile = abs
+	runtime.WindowSetTitle(a.ctx, "md-view: "+body.Title)
+
+	html := body.Body
+	if body.Frontmatter != "" {
+		html = body.Frontmatter + "\n" + html
+	}
+	return html, nil
 }
 
 // GetCurrentFile returns the absolute path of the currently open file.
