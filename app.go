@@ -4,23 +4,24 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 
 	"github.com/go-go-golems/md-view/pkg/renderer"
+	"github.com/go-go-golems/md-view/pkg/watcher"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // App is the Wails-bound application backend. Its public methods are
 // automatically exposed to the JavaScript frontend as Promise-returning
 // functions under window['go']['main']['App'].
-//
-// Phase 0 scaffold: bound methods are stubs. File rendering (Phase 1),
-// live reload (Phase 3), image serving (Phase 4), menus/drag-drop/recent
-// (Phase 5), single-instance CLI dispatch (Phase 6) are layered on later.
 type App struct {
 	ctx         context.Context // required for all Wails runtime calls
 	currentFile string
 	theme       string // "light" | "dark"
 	recentFiles []string
+	watcher     *watcher.FileWatcher // fsnotify wrapper for live reload
+	mu          sync.Mutex
+	watched     map[string]struct{} // files already watched (avoid duplicate watches)
 }
 
 // NewApp creates a new App instance with default values.
@@ -28,19 +29,30 @@ func NewApp() *App {
 	return &App{
 		theme:       "light",
 		recentFiles: []string{},
+		watched:     map[string]struct{}{},
 	}
 }
 
 // Startup is called when the Wails application starts. The context.Context
 // is required for all runtime operations (dialogs, events, window control)
-// and MUST be saved as a struct field.
+// and MUST be saved as a struct field. The file watcher is started here so a
+// later-edited open file can trigger a `file-changed` event (live reload).
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	fw, err := watcher.New()
+	if err != nil {
+		logger.Warn().Err(err).Msg("cannot create file watcher; live reload disabled")
+		return
+	}
+	a.watcher = fw
+	fw.Start()
 }
 
 // Shutdown is called when the application is about to quit.
 func (a *App) Shutdown(_ context.Context) {
-	// Phase 5: persist recent files here.
+	if a.watcher != nil {
+		_ = a.watcher.Close()
+	}
 }
 
 // --- Bound methods (stubs for Phase 0; implemented in later phases) ---
@@ -85,6 +97,7 @@ func (a *App) openPath(path string) (string, error) {
 	}
 
 	a.currentFile = abs
+	a.watchFile(abs)
 	runtime.WindowSetTitle(a.ctx, "md-view: "+body.Title)
 
 	html := body.Body
@@ -92,6 +105,16 @@ func (a *App) openPath(path string) (string, error) {
 		html = body.Frontmatter + "\n" + html
 	}
 	return html, nil
+}
+
+// ReopenCurrent re-renders the currently open file and returns the new HTML
+// fragment. The frontend calls it in response to the `file-changed` event
+// (live reload): it swaps #content and re-augments. Returns "" if no file is open.
+func (a *App) ReopenCurrent() (string, error) {
+	if a.currentFile == "" {
+		return "", nil
+	}
+	return a.openPath(a.currentFile)
 }
 
 // GetCurrentFile returns the absolute path of the currently open file.

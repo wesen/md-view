@@ -34,10 +34,10 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 3 — Live reload via events (replaces SSE)
 
-- [ ] 3.1 `internal/desktop/events.go`: `Startup` starts `pkg/watcher`; per-file `Watch` → goroutine → `EventsEmit("file-changed", path)`
-- [ ] 3.2 `app.js`: `EventsOn('file-changed')` → `ReopenCurrent()` → swap `#content.innerHTML` + re-run augmentations
-- [ ] 3.3 Verify: edit open file on disk → window reloads within ~1s
-- [ ] 3.4 Commit
+- [x] 3.1 `app.go`: watcher/mu/watched fields; `Startup` creates+starts `pkg/watcher`; `Shutdown` closes it; `openPath` calls `watchFile`. `events.go`: per-file goroutine → `EventsEmit("file-changed", path)`
+- [x] 3.2 `app.js`: `EventsOn('file-changed')` → `ReopenCurrent()` → `showContent` (re-augments). Added `ReopenCurrent` bound method
+- [x] 3.3 Verify: append to open file on disk → window updates within ~1s (Playwright `wait_for` marker succeeded; H2+marker appeared, original content preserved)
+- [x] 3.4 Commit
 
 ## Phase 4 — Image serving (DR-5)
 

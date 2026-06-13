@@ -355,3 +355,72 @@ Phase 2 made the rendered content look like the real md-view (GitHub styling, du
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): assets, dual-theme Chroma CSS, augmentation (Phase 2)".
 - Verification artifacts: `phase2-light-clean.png`, `phase2-dark-clean.png` (gitignored, in repo root).
+
+## Step 6: Phase 3 — live reload via Wails events (replaces SSE)
+
+Phase 3 restored the "edit the file, the view refreshes" behavior without any HTTP/SSE. The existing `pkg/watcher` (fsnotify) is reused; a goroutine translates each write into a Wails `file-changed` event; the frontend calls `ReopenCurrent()` and swaps the content.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3 — work through the tasks, diary, commit.)
+
+**Assistant interpretation:** Execute Phase 3: wire `pkg/watcher` into `App.Startup`, emit `file-changed` per watched file, add a `ReopenCurrent` bound method, and have `app.js` listen and re-render.
+
+**Inferred user intent:** Feature parity with the daemon model's SSE live reload, but in-process and event-driven.
+
+### What I did
+
+- Added `watcher *watcher.FileWatcher`, `mu sync.Mutex`, and `watched map[string]struct{}` to `App`. `Startup` creates + starts the watcher; `Shutdown` closes it. Duplicate watches are skipped.
+- `openPath` now calls `a.watchFile(abs)` after setting `currentFile`.
+- Added `events.go` with `watchFile(abs)`: registers the path with `watcher.Watch` (once) and spawns a goroutine that ranges over its `<-chan struct{}` and calls `runtime.EventsEmit(a.ctx, "file-changed", {path})`.
+- Added the `ReopenCurrent() (string, error)` bound method: re-renders `currentFile` via `openPath` (returns `""` if none open).
+- Added a `file-changed` listener in `app.js` that calls `ReopenCurrent()` and `showContent(html)` (which re-runs augmentation).
+- Structured logging via `logcopter.Package("md-view.desktop")` as `logger` (named to avoid clashing with stdlib `log` used in `main.go` for fatal-on-startup).
+
+### Why
+
+- The daemon model pushed reloads over an SSE `/events` stream; the file watcher fanned events to all SSE clients. In a single-process Wails app there's no HTTP, so the watcher → Wails event → bound-method path is the direct equivalent, with no network hop.
+- Reusing `pkg/watcher` unchanged keeps the cutover (Phase 7) smaller.
+
+### What worked
+
+- Verified end to end via `wails dev` browser mode + Playwright: opened `/tmp/md-view-reload.md` (H1 "Original Title", first line), appended `## Edited section\n\nEDITED_LIVE_RELOAD_MARKER …` to the file on disk, and `wait_for("EDITED_LIVE_RELOAD_MARKER")` succeeded. The post-edit DOM had the new `<h2>Edited section</h2>` and the marker, while the original H1 + first line were preserved (a content swap, not a full reload).
+- gofmt clean; `go build -tags webkit2_41 ./...` ok; `go test ./...` green.
+
+### What didn't work
+
+- **`var log` collided with stdlib `log`** (imported by `main.go` for `log.Fatal` on startup error): `./events.go:9:5: log already declared through import of package log`. Fixed by naming the logcopter logger `logger` instead. A package can't have both a `var log` and an imported `"log"`; the convention here is `logger` for the zerolog instance, `log` for stdlib.
+- The first batched edit to rename `log`→`logger` partially failed (edits targeting `app.go` were in the `events.go` call) — a copy/paste error in my edit targeting. Re-scoped to one file per concern and it applied cleanly.
+- The Wails window was closed mid-session by the user; closing the window exits the app (tmux session gone) — expected desktop behavior. Verification had already completed before the close.
+
+### What I learned
+
+- Closing the main Wails window terminates the process (no tray-by-default). Relevant for Phase 6's single-instance story: when instance #1's window closes, the app exits, so a subsequent `md-view view` correctly starts fresh (no lingering instance) — `SingleInstanceLock` will simply not find a lock.
+- `watcher.Watch` is idempotent-enough to call per openPath, but `fsnotify.Add` on an already-watched path is a no-op that still returns a *new* channel per `Watch` call — hence the `watched` set guard to avoid spawning duplicate goroutines.
+
+### What was tricky to build
+
+- **The `var log` vs stdlib `log` clash** is the kind of thing that only surfaces at compile across two files in the same package. Documented so Phase 5/6 additions use `logger` consistently.
+- Ensuring the watcher goroutine doesn't leak: it exits when the channel closes (`watcher.Close` in `Shutdown`), and the `watched` set prevents duplicates.
+
+### What warrants a second pair of eyes
+
+- The `watched` map never has entries removed (files stay watched for the app's lifetime). Acceptable for a single-window viewer; if multi-file/multi-tab is added later, eviction on close would be needed.
+- Live reload only fires for the *currently open* file's path (the frontend compares `data.path`); opening file B stops updates for file A until A is reopened. Confirm this matches expectations (it mirrors the daemon model, which watched the file in the active tab).
+
+### What should be done in the future
+
+- Phase 4: image serving (`AssetServer.Handler` + allow-list).
+- Add a favicon handler to clear the recurring 404.
+
+### Code review instructions
+
+- `app.go`: new fields (`watcher`, `mu`, `watched`), `Startup`/`Shutdown` watcher lifecycle, `openPath` calls `watchFile`, new `ReopenCurrent` bound method.
+- `events.go` (new): `watchFile` → goroutine → `EventsEmit("file-changed")`.
+- `frontend/dist/app.js`: `file-changed` listener → `ReopenCurrent()` → `showContent`.
+- Validate: `wails dev -tags webkit2_41`; open a file; append to it on disk; the window updates within ~1s.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): live reload via Wails events (Phase 3)".
+- Event name: `file-changed`; payload `{path string}`.

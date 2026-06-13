@@ -91,6 +91,17 @@ runtime.EventsOn('close-file', () => {
     clearError();
 });
 
+// Live reload: the Go backend watches the open file with fsnotify and emits
+// `file-changed` on write. Re-render the current file and swap the content
+// (showContent re-runs copy/mermaid augmentation). This replaces SSE /events.
+runtime.EventsOn('file-changed', (data) => {
+    if (!data || !data.path) return;
+    clearError();
+    window['go']['main']['App']['ReopenCurrent']()
+        .then((html) => { if (html) showContent(html); })
+        .catch((err) => { showError('Reload failed: ' + err); });
+});
+
 // ---- Helper: Display Rendered HTML ----
 function showContent(html) {
     contentDiv.innerHTML = html;
