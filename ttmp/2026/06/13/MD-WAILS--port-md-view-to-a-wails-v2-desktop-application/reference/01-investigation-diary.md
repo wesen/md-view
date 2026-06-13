@@ -284,3 +284,74 @@ Phase 1's goal was to make the Wails window actually render a Markdown file, by 
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): RenderBody refactor + wire renderer to window (Phase 1)".
 - Verification artifact: `.playwright-mcp/phase1-render.png` (gitignored).
+
+## Step 5: Phase 2 — assets, dual-theme Chroma CSS, augmentation
+
+Phase 2 made the rendered content look like the real md-view (GitHub styling, dual-theme syntax highlighting) and wired the Mermaid + copy-button augmentation to re-run after each content swap — a necessity in the Wails fragment model (only `#content` changes; scripts don't re-execute).
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3 — work through the tasks, diary, commit.)
+
+**Assistant interpretation:** Execute Phase 2: copy md-view's static assets into the frontend, generate the dual-theme Chroma CSS at build time, link everything, and make Mermaid + copy buttons work on dynamically-swapped content.
+
+**Inferred user intent:** Feature parity with md-view's visual output (styling, dark mode, diagrams, copy buttons) inside the desktop window.
+
+### What I did
+
+- Copied `base.css`, `dark.css`, `mermaid.min.js`, `mermaid-init.js`, `copy-button.js` from `pkg/renderer/static/` into `frontend/dist/`.
+- **DR-4 generator:** created `cmd/gen-chroma-css` that writes `frontend/dist/chroma.css` (dual-theme: github light + dracula dark prefixed with `[data-theme="dark"]`) AND `frontend/dist/ui.css` (md-view's in-page UI chrome — frontmatter block, copy/reMarkable/toolbar buttons — via a new public `renderer.UICSS()` wrapper around the existing `themeCSS`). Added `make frontend-css`.
+- Added `renderer.UICSS()` (public) returning `themeCSS(false)` (which already includes light + dark overrides).
+- **`augment.js`:** ported `copy-button.js` + `mermaid-init.js` into idempotent, re-runnable functions exposed as `window.MDSAugmentPage()` (copy buttons + mermaid render) and `window.MDSMermaidRerender(theme)` (re-render diagrams on theme change). Idempotency guards prevent double-wrapping.
+- Updated `index.html` to link `style.css` (app chrome) + `base.css` + `chroma.css` + `ui.css` + `dark.css`, and load `mermaid.min.js` + `augment.js` + `app.js`.
+- Updated `app.js`: `applyTheme` now sets `data-theme` on **both** `<html>` and `<body>` (md-view's CSS targets `[data-theme="dark"]` on an ancestor) and calls `MDSMermaidRerender`; `showContent` calls `MDSAugmentPage()` after every content swap.
+
+### Why
+
+- The daemon model ran augmentation IIFEs once per full page load. The Wails model keeps page chrome stable and swaps only `#content`, so augmentation must be callable repeatedly — hence `augment.js`.
+- Generating CSS once (vs. per render) is DR-4: deterministic, cacheable, and it lets the renderer's `ChromaCSSBoth`/`UICSS` helpers produce static assets instead of being inlined on every `Render`.
+
+### What worked
+
+- Verified end-to-end via `wails dev` browser mode + Playwright against `/tmp/md-view-phase2.md` (frontmatter + go code + mermaid + table): frontmatter details block present, 1 copy button (after a guard to skip `language-mermaid`), mermaid rendered to **SVG**, all correct.
+- **Theme toggle verified by computed style:** light keyword `rgb(207,34,46)` / code bg `#f6f8fa` vs dark keyword `rgb(255,121,198)` / bg `#161b22` — both color and background flip. A fresh-backend screenshot pair (light + dark via the real theme button) confirmed GitHub styling, Mermaid diagrams, and readable contrast in both themes.
+- All renderer tests green; `go build -tags webkit2_41 ./...` clean; `make frontend-css` regenerates both CSS files.
+
+### What didn't work
+
+- **First `applyTheme` test showed "no color change":** I only set `data-theme` on `<html>`, but `<body>` retained the stale `dark` value from a prior toggle, so the dark CSS kept matching via the body. Fix: `applyTheme` sets **both** elements. This is a real invariant — document it: the data-theme attribute must be consistent on whatever element(s) the CSS targets as ancestors.
+- **Vision QA flagged "copy button not visible":** that's by design — `.md-view-copy-btn { opacity: 0 }`, revealed on `.md-view-code-container:hover` (inherited from the original md-view). A static screenshot can't show a hover-revealed control; the DOM (count=1) and base.css confirm it's correct.
+- **Screenshot showed dark when light was expected (once):** a `wails dev` hot reload re-ran `app.js` init, which called `GetTheme()` → the backend's persisted `dark` → reverted my manual light override. Restarting dev for a clean backend fixed it. Lesson: when testing theming through the dev server, remember backend `App` state persists across browser reloads.
+
+### What I learned
+
+- Chroma token classes for Go are subtypes (`kn` keyword-namespace, `kd` keyword-declaration, `nx`, `s`, …), not bare `.k` — a `.chroma .k` selector matches nothing; use `.kn`/`.kd` to probe. The dual-theme CSS itself is fine.
+- `themeCSS(dark bool)` ignores its `dark` parameter — it always returns light + darkOverrides concatenated. So `UICSS() = themeCSS(false)` gives both themes; the param is vestigial.
+
+### What was tricky to build
+
+- **Augmentation ordering:** `initCopyButtons` ran before `initMermaid`, so the mermaid code block got a copy button before being converted to a diagram. Fixed by skipping `language-mermaid` code blocks in `initCopyButtons`. Without this, a stray copy button sat next to each diagram.
+- **data-theme placement & consistency** (documented above).
+
+### What warrants a second pair of eyes
+
+- The `applyTheme` dual-attribute (`html` + `body`) set: confirm this is acceptable vs. picking one canonical element (md-view's full-page `Render` set it on `<html>` only). Both work as long as consistent; setting both is defensive.
+- Whether `ui.css` (generated from `themeCSS`) is the right home for the button chrome, or whether those rules should migrate into `base.css`/`dark.css` and `UICSS`/`themeCSS` be retired.
+
+### What should be done in the future
+
+- Phase 3: live reload (watcher → `file-changed` event → `ReopenCurrent()` → re-augment). The `MDSAugmentPage` re-run hook is already in place.
+- Consider adding a favicon handler to silence the console 404.
+
+### Code review instructions
+
+- `pkg/renderer/renderer.go`: new `UICSS()`.
+- `cmd/gen-chroma-css/main.go`: writes `frontend/dist/{chroma,ui}.css`.
+- `Makefile`: `frontend-css`, `wails-dev`, `wails-build` targets.
+- `frontend/dist/{index.html,app.js,augment.js,base.css,dark.css,chroma.css,ui.css,mermaid.min.js,copy-button.js}`.
+- Validate: `make frontend-css`; `wails dev -tags webkit2_41`; render `/tmp/md-view-phase2.md`; toggle theme.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): assets, dual-theme Chroma CSS, augmentation (Phase 2)".
+- Verification artifacts: `phase2-light-clean.png`, `phase2-dark-clean.png` (gitignored, in repo root).

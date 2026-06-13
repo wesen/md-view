@@ -1,4 +1,4 @@
-.PHONY: all build run test lint lintmax golangci-lint-install gosec govulncheck goreleaser clean install dev tag-major tag-minor tag-patch release bump-glazed gifs
+.PHONY: all build run test lint lintmax golangci-lint-install gosec govulncheck goreleaser clean install dev tag-major tag-minor tag-patch release bump-glazed gifs chroma-css wails-dev wails-build
 
 all: build
 
@@ -20,6 +20,20 @@ GLAZED_LINT_FLAGS ?= -glazedclilint.allow-paths=pkg/commands/,pkg/daemon/daemon.
 build:
 	GOWORK=off go generate ./...
 	GOWORK=off go build -o $(BINARY) ./cmd/md-view
+
+# Frontend assets: regenerate the static CSS the Wails frontend links (MD-WAILS DR-4).
+# Produces frontend/dist/chroma.css (dual-theme code highlighting) and ui.css
+# (frontmatter + button chrome, both themes).
+frontend-css:
+	GOWORK=off go run -tags webkit2_41 ./cmd/gen-chroma-css
+
+# Desktop app (Wails v2). During the MD-WAILS transition these coexist with the
+# legacy CLI build above; the Phase 7 cutover repoints `build` to the Wails app.
+wails-dev:
+	wails dev -tags webkit2_41
+
+wails-build:
+	wails build -tags webkit2_41 -s
 
 run: build
 	./$(BINARY) view $(FILE)

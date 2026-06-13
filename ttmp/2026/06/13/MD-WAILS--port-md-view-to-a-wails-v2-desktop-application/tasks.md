@@ -26,11 +26,11 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 2 — Assets, CSS, Chroma (DR-4)
 
-- [ ] 2.1 Copy `base.css`, `dark.css`, `mermaid.min.js`, `mermaid-init.js`, `copy-button.js` from `pkg/renderer/static/` into `frontend/dist/`
-- [ ] 2.2 Generate `frontend/dist/chroma.css` (both themes) via a tiny generator + `make chroma-css`
-- [ ] 2.3 Link assets in `index.html`; wire theme toggle + mermaid init
-- [ ] 2.4 Verify: dark toggle recolors code; a ```` ```mermaid ```` block renders
-- [ ] 2.5 Commit
+- [x] 2.1 Copy `base.css`, `dark.css`, `mermaid.min.js`, `mermaid-init.js`, `copy-button.js` from `pkg/renderer/static/` into `frontend/dist/`
+- [x] 2.2 Generate `frontend/dist/chroma.css` (both themes) + `frontend/dist/ui.css` via `cmd/gen-chroma-css` + `make frontend-css`; added `renderer.UICSS()`
+- [x] 2.3 Link assets in `index.html`; `app.js` applyTheme sets data-theme on html+body + re-renders mermaid; `augment.js` re-runs copy/mermaid after each swap
+- [x] 2.4 Verify: dark toggle recolors code (computed styles flip: keyword rgb(207,34,46)→rgb(255,121,198)); a ```mermaid block renders to SVG; copy button present (hover-reveal by design)
+- [x] 2.5 Commit
 
 ## Phase 3 — Live reload via events (replaces SSE)
 

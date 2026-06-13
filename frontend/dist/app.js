@@ -98,6 +98,10 @@ function showContent(html) {
     dropzone.style.display = 'none';
     clearError();
 
+    // Re-run content augmentation (copy buttons + mermaid) against the new DOM.
+    // The page chrome is stable; only #content is swapped per file / reload.
+    if (window.MDSAugmentPage) window.MDSAugmentPage();
+
     // Update the filename display in the toolbar
     window['go']['main']['App']['GetCurrentFile']()
         .then((path) => {
@@ -116,8 +120,13 @@ function showContent(html) {
 
 // ---- Helper: Apply Theme ----
 function applyTheme(theme) {
+    // md-view's CSS targets [data-theme="dark"] on an ancestor of .markdown-body;
+    // set it on <html> (md-view's convention) and mirror on <body>.
+    document.documentElement.setAttribute('data-theme', theme);
     document.body.setAttribute('data-theme', theme);
     themeBtn.textContent = theme === 'dark' ? '☀️ Light' : '🌙 Dark';
+    // Re-render mermaid diagrams for the new theme.
+    if (window.MDSMermaidRerender) window.MDSMermaidRerender(theme);
 }
 
 // ---- Helper: Show Error ----

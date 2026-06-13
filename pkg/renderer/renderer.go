@@ -129,6 +129,15 @@ func ChromaCSSBoth() (string, error) {
 	return buf.String(), nil
 }
 
+// UICSS returns the CSS for md-view's in-page UI chrome: the frontmatter
+// <details> block, the fixed-position buttons (copy/reMarkable/toolbar),
+// the copy-to-clipboard code-block button, and their dark-theme overrides.
+// The desktop frontend links this as a static asset (ui.css) instead of
+// inlining it per render. It includes both light and [data-theme="dark"] rules.
+func UICSS() string {
+	return themeCSS(false)
+}
+
 // Options for rendering.
 type Options struct {
 	// NoReload disables SSE live reload injection.

@@ -3,9 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MarkDown Viewer</title>
+    <title>md-view</title>
+    <!-- App chrome (toolbar / dropzone / sidebar) -->
     <link rel="stylesheet" href="style.css">
+    <!-- GitHub-flavored markdown content styling -->
+    <link rel="stylesheet" href="base.css">
+    <!-- Syntax highlighting (dual-theme, generated: make frontend-css) -->
     <link rel="stylesheet" href="chroma.css">
+    <!-- In-page UI chrome: frontmatter block, copy/reMarkable/toolbar buttons (generated) -->
+    <link rel="stylesheet" href="ui.css">
+    <!-- Dark page overrides (activated by [data-theme="dark"] on <html>) -->
+    <link rel="stylesheet" href="dark.css">
 </head>
 <body data-theme="light">
     <!-- Toolbar -->
@@ -29,7 +37,9 @@
             </div>
         </div>
 
-        <!-- Rendered content: shown when a file is open -->
+        <!-- Rendered content: shown when a file is open.
+             window.MDSAugmentPage() (in augment.js) is re-run after every swap
+             to inject copy buttons and render mermaid blocks. -->
         <div id="content" class="markdown-body" style="display:none"></div>
     </div>
 
@@ -39,8 +49,13 @@
         <ul id="recent-list"></ul>
     </div>
 
-    <!-- Wails runtime (auto-injected in dev mode; needed for EventsOn in production) -->
+    <!-- Wails runtime (auto-injected in dev; needed for runtime.EventsOn) -->
     <script src="/wails/runtime.js"></script>
+    <!-- Mermaid diagram library -->
+    <script src="mermaid.min.js"></script>
+    <!-- Content augmentation: copy buttons + mermaid (re-runnable after content swaps) -->
+    <script src="augment.js"></script>
+    <!-- App logic -->
     <script src="app.js"></script>
 </body>
 </html>
