@@ -41,6 +41,7 @@ func NewApp() *App {
 // later-edited open file can trigger a `file-changed` event (live reload).
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
+	a.loadRecentFiles()
 	fw, err := watcher.New()
 	if err != nil {
 		logger.Warn().Err(err).Msg("cannot create file watcher; live reload disabled")
@@ -52,6 +53,7 @@ func (a *App) Startup(ctx context.Context) {
 
 // Shutdown is called when the application is about to quit.
 func (a *App) Shutdown(_ context.Context) {
+	a.saveRecentFiles()
 	if a.watcher != nil {
 		_ = a.watcher.Close()
 	}
@@ -101,6 +103,7 @@ func (a *App) openPath(path string) (string, error) {
 	a.currentFile = abs
 	a.watchFile(abs)
 	a.addAllowedDir(filepath.Dir(abs))
+	a.pushRecent(abs)
 	runtime.WindowSetTitle(a.ctx, "md-view: "+body.Title)
 
 	html := body.Body
@@ -118,6 +121,15 @@ func (a *App) ReopenCurrent() (string, error) {
 		return "", nil
 	}
 	return a.openPath(a.currentFile)
+}
+
+// currentFileTitle returns the base name of the current file ("" if none).
+// Used by the menu's file-opened event payload.
+func (a *App) currentFileTitle() string {
+	if a.currentFile == "" {
+		return ""
+	}
+	return filepath.Base(a.currentFile)
 }
 
 // GetCurrentFile returns the absolute path of the currently open file.
@@ -145,6 +157,27 @@ func (a *App) GetTheme() string {
 	return a.theme
 }
 
-// OnFileDrop is called when the user drops a file onto the window
-// (Wails v2 DragAndDrop must be enabled in options).
-func (a *App) OnFileDrop(_, _ int, _ []string) {}
+// OnFileDrop is called when the user drops a file onto the window (requires
+// DragAndDrop.EnableFileDrop in the Wails options). It picks the first
+// Markdown-looking file, opens it, and emits `file-opened` so the frontend
+// swaps the content — the same event path the menu uses.
+func (a *App) OnFileDrop(_, _ int, paths []string) {
+	for _, path := range paths {
+		if !isMarkdownExt(path) {
+			continue
+		}
+		html, err := a.openPath(path)
+		if err != nil || html == "" || a.ctx == nil {
+			if err != nil && a.ctx != nil {
+				runtime.EventsEmit(a.ctx, "file-error", err.Error())
+			}
+			return
+		}
+		runtime.EventsEmit(a.ctx, "file-opened", map[string]string{
+			"html":  html,
+			"path":  a.currentFile,
+			"title": a.currentFileTitle(),
+		})
+		return
+	}
+}

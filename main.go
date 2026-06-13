@@ -30,10 +30,14 @@ func main() {
 			Assets:  assets,
 			Handler: http.HandlerFunc(app.ServeReferencedFile), // serves /file/<abs> images (DR-5)
 		},
+		Menu:       buildMenu(app),
 		OnStartup:  app.Startup,
 		OnShutdown: app.Shutdown,
 		Bind: []interface{}{
 			app,
+		},
+		DragAndDrop: &options.DragAndDrop{
+			EnableFileDrop: true,
 		},
 	})
 	if err != nil {

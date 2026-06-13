@@ -489,3 +489,71 @@ Phase 4 made relative Markdown images (`![](images/x.png)`) render in the window
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): image serving via AssetServer.Handler (Phase 4)".
 - Handler type: `http.Handler`; adapter: `http.HandlerFunc`.
+
+## Step 8: Phase 5 — menus, drag-and-drop, recent files, window title
+
+Phase 5 added the desktop app's interaction surface: a native menu bar (File→Open/Close, View→Toggle Theme) that emits events, drag-and-drop file opening, and persistent recent-files. The window title was already set in `openPath` (Phase 1).
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3 — work through the tasks, diary, commit.)
+
+**Assistant interpretation:** Execute Phase 5: build the menu (event-emitting), implement `OnFileDrop`, add recent-files JSON persistence, and confirm `WindowSetTitle`.
+
+**Inferred user intent:** A first-class desktop UX (menus, shortcuts, drag-drop, remembered files) matching the demo and replacing the browser-tab experience.
+
+### What I did
+
+- `menu.go` — `buildMenu(app)`: File→Open… (Ctrl/Cmd-O) calls `app.OpenFile()` and emits `file-opened` (or `file-error`); File→Close (Ctrl/Cmd-W) emits `close-file`; View→Toggle Theme (T) calls `app.ToggleTheme()` and emits `theme-changed`. Follows the "menu callbacks emit events" golden rule (Go can't touch the DOM).
+- `recent.go` — recent-files persistence ported from the demo: `configPath` (`os.UserConfigDir()/md-view`), `loadRecentFiles`/`saveRecentFiles` (JSON array), `pushRecent` (prepend, dedup, cap 10), `isMarkdownExt`.
+- `app.go` — `Startup` calls `loadRecentFiles()`; `Shutdown` calls `saveRecentFiles()` then closes the watcher; `openPath` calls `pushRecent(abs)`; added `currentFileTitle()`; implemented `OnFileDrop(_, _, paths)` (picks first `.md`, `openPath`, emits `file-opened`).
+- `main.go` — wired `Menu: buildMenu(app)` and `DragAndDrop: &options.DragAndDrop{EnableFileDrop: true}`.
+
+### Why
+
+- Menus and drag-drop are the two ways users open files without typing a path; both must route through the same `openPath` → `file-opened` event path as the toolbar Open button, so the frontend has one DOM-update path.
+- Recent-files persistence replaces the daemon's PID/port/socket state files with one tiny JSON under the XDG config dir — the same pattern the demo proved.
+
+### What worked
+
+- Verified recent-files end-to-end via `wails dev` browser mode + Playwright: opened two files via `OpenFileAtPath`; `GetRecentFiles()` returned both, most-recent-first (`/tmp/md-view-phase2.md` then `/tmp/md-view-reload.md`). Stopping the dev server (Ctrl-C → `Shutdown`) wrote `~/.config/md-view/recent.json` = `["/tmp/md-view-phase2.md","/tmp/md-view-reload.md"]`. Persistence round-trips (load on next Startup).
+- gofmt clean; `go vet` clean; build + tests green.
+- The frontend's existing `loadRecentFiles()` (calls `GetRecentFiles()`, renders the sidebar, re-runs on every `showContent`) already consumes the Go list — no frontend change needed for the sidebar.
+
+### What didn't work
+
+- Nothing failed. One note: `document.title` stays "md-view" in the **browser** dev mode — `runtime.WindowSetTitle` sets the *native window* title, not the browser tab, so it's only visible in the real desktop window (or `wails build`), not Playwright-on-browser. Not a bug; just a verification limitation.
+
+### What I learned
+
+- The menu, the toolbar, drag-drop, and recent-files clicks all funnel through `openPath` + the `file-opened` event. Keeping that single chokepoint is what made Phase 5 small — adding new entry points just means calling `openPath` and emitting the event.
+- `os.UserConfigDir()` is cross-platform (XDG on Linux, `~/Library/Application Support` on macOS, `%AppData%` on Windows), so recent-files land in the right place per OS without `#ifdef`.
+
+### What was tricky to build
+
+- **Menu callback → DOM gap:** the natural mistake is to call `app.OpenFile()` in the menu callback and expect the UI to update. It won't — the result lives in Go. The demo's pattern (emit `file-opened` with `{html,path,title}`) is mandatory; reproduced exactly.
+- Remembering that `saveRecentFiles` only runs on `Shutdown` — so the JSON isn't on disk until the app quits cleanly. Verified by stopping the dev server and reading the file afterward.
+
+### What warrants a second pair of eyes
+
+- `OnFileDrop` silently returns on a non-`.md` drop (no error event). Acceptable, but consider emitting a `file-error` ("not a markdown file") if UX wants feedback.
+- Recent files are saved only on shutdown; a crash loses the session. Consider saving after each `pushRecent` if durability matters (cheap write).
+
+### What should be done in the future
+
+- Phase 6: the single-instance CLI dispatch (`SingleInstanceLock` + Cobra `view`) — the core of drop-in compatibility.
+- Persist the theme preference alongside recent files (open question OQ-2).
+- Add a favicon handler to clear the 404.
+
+### Code review instructions
+
+- `menu.go` (new): `buildMenu`.
+- `recent.go` (new): config path + load/save/push + `isMarkdownExt`.
+- `app.go`: `Startup`/`Shutdown` recent lifecycle, `openPath` → `pushRecent`, `currentFileTitle`, `OnFileDrop`.
+- `main.go`: `Menu` + `DragAndDrop` options.
+- Validate: open two files; `~/.config/md-view/recent.json` appears on quit and reloads next start.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): menus, drag-drop, recent files (Phase 5)".
+- Config dir: `os.UserConfigDir()/md-view`; file: `recent.json`.

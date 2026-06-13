@@ -48,11 +48,11 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 5 — Menus, drag-and-drop, recent files, window title
 
-- [ ] 5.1 `BuildMenu(app)`: File (Open… Ctrl/Cmd-O, Close), View (Toggle Theme); callbacks emit events
-- [ ] 5.2 `OnFileDrop(x,y,paths)` → `openPath` → `file-opened`
-- [ ] 5.3 Recent-files JSON persistence (`UserConfigDir`) + `GetRecentFiles`/`RemoveRecentFile`
-- [ ] 5.4 `WindowSetTitle` on open
-- [ ] 5.5 Commit
+- [x] 5.1 `menu.go` `buildMenu(app)`: File (Open… Ctrl/Cmd-O → emits file-opened/file-error; Close Ctrl/Cmd-W → close-file), View (Toggle Theme T → theme-changed). Callbacks emit events
+- [x] 5.2 `OnFileDrop(_,_,paths)`: first `.md` → `openPath` → `file-opened`
+- [x] 5.3 Recent-files JSON persistence (`recent.go`: `os.UserConfigDir()/md-view/recent.json`, load on Startup, save on Shutdown, pushRecent dedup+cap10) + `GetRecentFiles`/`currentFileTitle`
+- [x] 5.4 `WindowSetTitle` on open (already in openPath since Phase 1)
+- [x] 5.5 Commit
 
 ## Phase 6 — Single-instance CLI dispatch + `view` command (DR-7, DR-8)
 
