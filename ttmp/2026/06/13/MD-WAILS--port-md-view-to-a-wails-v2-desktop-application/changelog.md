@@ -44,3 +44,12 @@ Added sources/01..03 (SingleInstanceLock API, Cobra discussion #1271, CLI-with-a
 
 - /home/manuel/code/wesen/2026-05-07--md-server/ttmp/2026/06/13/MD-WAILS--port-md-view-to-a-wails-v2-desktop-application/sources/01-wails-single-instance-lock-api.md — Core drop-in mechanism
 
+
+## 2026-06-13
+
+Added implementation review / lessons-learned document for a new maintainer or intern; captures subsystem map, review scorecard, strengths, weaknesses, stale-docs finding, build/release lessons, and recommended next learning/follow-up work.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-05-07--md-server/ttmp/2026/06/13/MD-WAILS--port-md-view-to-a-wails-v2-desktop-application/design-doc/01-implementation-review-and-lessons-learned.md — Post-implementation technical review deliverable
+

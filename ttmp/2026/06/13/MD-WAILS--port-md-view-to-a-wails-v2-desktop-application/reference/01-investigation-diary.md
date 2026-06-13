@@ -774,3 +774,69 @@ Phase 8 restored the in-page toolbar buttons (reMarkable upload, copy-path, down
 ## Phase summary (all 9 phases complete)
 
 Phases 0–8 are done. `md-view` is now a single ~17 MB Wails v2 binary, drop-in at the CLI (`md-view view <file> [--dark]`), with: dual-theme GitHub styling, Chroma syntax highlighting, Mermaid diagrams, frontmatter rendering, live reload, image serving (allow-listed), copy-to-clipboard, menus, drag-and-drop, recent-files persistence, and reMarkable upload + toolbar buttons. The daemon/socket/HTTP/PID packages are deleted. Build is `wails build` (via `make build`). Known limitation: `SingleInstanceLock` does not dedupe on this Linux/D-Bus setup (2nd invocation opens a new window) — accepted per user decision.
+
+## Step 12: Post-implementation review document for the new maintainer / intern
+
+After the implementation was complete, a second deliverable was requested: not another design doc, but a technical review of the finished work. The purpose was to step back from the phase-by-phase diary and evaluate the rewrite as a completed engineering project: what was strong, what was weak, what should have been known earlier, what helped, and what a new intern should learn next.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Ok, we're taking over, this was our little brother writing all the code and doing all the planning, a big projcet for them. We are now going to review it, and figure out what worked, what's good, what's bad, what they should have known better, what could have helped them, what they should do in the future, where to look for and what to learn. Create  a detailed analysis / and review document that is for a new intern, explaining all the parts of the system needed to understand what it is, with prose paragraphs and bullet point sand pseudocode and diagrams and api references and file references. It should be very clear and technical. Store in the ticket and the nupload to remarkable."
+
+**Assistant interpretation:** Produce a second, intern-facing ticket deliverable focused on technical review and lessons learned, not implementation planning: explain the completed system, then evaluate the engineering process and resulting codebase honestly.
+
+**Inferred user intent:** Preserve judgment, not just implementation details. A future maintainer should understand both the final architecture and the review conclusions about quality, risks, and what to learn next.
+
+### What I did
+
+- Added a new ticket document: `design-doc/01-implementation-review-and-lessons-learned.md`.
+- Gathered line-anchored evidence from the finished code (`main.go`, `app.go`, `events.go`, `assets.go`, `menu.go`, `recent.go`, `cli.go`, `pkg/renderer/renderer.go`, frontend JS files, `Makefile`, `.goreleaser.yaml`, `AGENT.md`) and from the current stale docs (`README.md`, `docs/getting-started.md`, `docs/user-guide.md`).
+- Wrote a long-form review covering:
+  - the current architecture and subsystem map,
+  - what was done well (renderer preservation, phased implementation, runtime verification, clean cutover),
+  - what was weak or incomplete (stale public docs, late build-system discovery, single-instance assumption, thin unit coverage outside renderer/CLI),
+  - what the implementer should have known earlier,
+  - what helped,
+  - what to learn next,
+  - concrete follow-up tasks.
+- Fixed a frontmatter corruption issue caused by earlier shell-quoted `docmgr doc relate` calls and restored a clean docmgr-compatible frontmatter block.
+
+### What worked
+
+- The review found a real and important issue that would be easy to miss in a celebratory implementation summary: the **user-facing docs are still stale** and still describe the deleted daemon/browser model. This is a serious product/documentation flaw and is now explicit rather than implicit.
+- The finished repo state was clean (`git status` clean), which made it possible to review the implementation as a stable artifact rather than a moving target.
+
+### What didn't work
+
+- Earlier `docmgr doc relate` calls to the new review doc were polluted by shell parsing (`backticks` in a file-note and a Wails/pkg-config side effect), leaving the frontmatter's `RelatedFiles` block corrupted. I replaced the frontmatter with a clean block and chose not to re-add relations automatically in this step; the review doc's body already contains the precise file references and line anchors.
+
+### What I learned
+
+- Review documents need a different voice from implementation guides. The design guide says "here is the plan and architecture." The review doc says "here is what actually happened, and here is the quality judgment."
+- The stale-docs finding is the clearest example of why post-implementation reviews matter: the code was ahead of the docs, and without a dedicated review deliverable that mismatch might have remained a vague discomfort instead of an actionable item.
+
+### What was tricky to build
+
+- The challenge was to keep the tone technically direct without collapsing into a bug list. A useful review needs both system explanation and judgment, or an intern cannot connect the lessons to the code.
+
+### What warrants a second pair of eyes
+
+- The review's assessment of `.goreleaser.yaml` is intentionally cautious: the config was updated intelligently, but the exact Wails tag set used there still deserves a real release dry-run before a production release.
+- The judgment that `SingleInstanceLock` should remain in code as a best-effort feature, despite not deduping on this Linux/D-Bus setup, is reasonable but not inevitable. Another maintainer might prefer to remove it until it is proven.
+
+### What should be done in the future
+
+- Rewrite the public docs immediately (README + getting-started + user-guide) to match the cutover.
+- Run a real GoReleaser dry run.
+- Add focused unit tests around `assets.go` and `recent.go`.
+
+### Code review instructions
+
+- Read the implementation review after the design guide. The two docs answer different questions and are meant to be read together.
+- Spot-check the stale-docs evidence in `README.md`, `docs/getting-started.md`, and `docs/user-guide.md` — this is the most actionable review finding.
+- Compare the review's scorecard against the actual commits and current file structure.
+
+### Technical details
+
+- Deliverable path: `design-doc/01-implementation-review-and-lessons-learned.md`.
+- Upload bundle (this step): review doc + diary + design guide + index to reMarkable.
