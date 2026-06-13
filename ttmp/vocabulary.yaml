@@ -17,6 +17,12 @@ topics:
       description: Go programming language
     - slug: glazed
       description: Glazed CLI framework
+    - slug: wails
+      description: Wails v2 Go desktop application framework
+    - slug: desktop
+      description: Native desktop applications (WebView-based)
+    - slug: architecture
+      description: System architecture and design
 docTypes:
     - slug: design-doc
       description: Structured rationale and architecture notes
