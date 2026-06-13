@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarkDown Viewer</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="chroma.css">
+</head>
+<body data-theme="light">
+    <!-- Toolbar -->
+    <div id="toolbar">
+        <button id="open-btn" title="Open File (Ctrl+O)">📂 Open</button>
+        <span id="filename">No file open</span>
+        <button id="theme-btn" title="Toggle Theme">🌙 Dark</button>
+    </div>
+
+    <!-- Error bar -->
+    <div id="error" style="display:none"></div>
+
+    <!-- Main content area -->
+    <div id="main">
+        <!-- Drop zone: shown when no file is open -->
+        <div id="dropzone">
+            <div id="dropzone-inner">
+                <div class="dropzone-icon">📄</div>
+                <p>Drop a Markdown file here</p>
+                <p class="hint">or click <strong>Open</strong> to browse</p>
+            </div>
+        </div>
+
+        <!-- Rendered content: shown when a file is open -->
+        <div id="content" class="markdown-body" style="display:none"></div>
+    </div>
+
+    <!-- Recent files sidebar -->
+    <div id="sidebar" style="display:none">
+        <h3>Recent Files</h3>
+        <ul id="recent-list"></ul>
+    </div>
+
+    <!-- Wails runtime (auto-injected in dev mode; needed for EventsOn in production) -->
+    <script src="/wails/runtime.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

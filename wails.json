@@ -1,0 +1,16 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "md-view",
+  "outputfilename": "md-view",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dev:watcher": "",
+  "frontend:dev:serverUrl": "",
+  "info": {
+    "companyName": "go-go-golems",
+    "productName": "md-view",
+    "productVersion": "0.2.0",
+    "copyright": "Copyright 2026",
+    "comments": "A Markdown viewer desktop app built with Wails v2 and Go"
+  }
+}

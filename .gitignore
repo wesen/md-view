@@ -14,8 +14,8 @@
 # Dependency directories
 # vendor/
 
-# GoReleaser dist
-dist/
+# GoReleaser dist (root build output only; do NOT ignore frontend/dist)
+/dist/
 
 # Project binary
 /md-view
@@ -44,3 +44,8 @@ dist/
 
 # golangci-lint binary
 .bin/
+
+# Wails (desktop app)
+/build/
+/frontend/wailsjs/
+/frontend/node_modules/

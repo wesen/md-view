@@ -140,3 +140,79 @@ After the v1 guide (coexistence: two binaries) was written, the user clarified t
 
 - Sources stored at `sources/{00-sources-index,01-wails-single-instance-lock-api,02-wails-cobra-integration-discussion-1271,03-wails-cli-with-app-discussion-3098}.md`.
 - `SingleInstanceLock` added in Wails v2.7.0; demo pins v2.12.0 → satisfied.
+
+## Step 3: Phase 0 — scaffold the Wails app and open a window
+
+With the design locked as a drop-in replacement, work began on the actual codebase. Phase 0's goal was narrowly scoped: get a native window to open from `wails dev`, with the bound `App` struct in place, so every later phase has a running surface to build on. The renderer, menus, and single-instance lock all come later.
+
+### Prompt Context
+
+**User prompt (verbatim):** "Add detailed tasks to the ticket, then work on them one by one, keeping a detailed diary as you work, and committing at appropriate intervals. (see skills if needed)"
+
+**Assistant interpretation:** Turn the design doc's phase plan into an atomic, checkable task list, then execute the phases in order — implementing, verifying, diary-updating, and committing at each checkpoint.
+
+**Inferred user intent:** Move from design to working software, with an auditable trail (diary) and clean git history (per-phase commits).
+
+### Environment check (before scaffolding)
+
+- Wails CLI **v2.12.0** already installed at `/home/manuel/go/bin/wails` (≥ v2.7.0 → `SingleInstanceLock` available).
+- `webkit2gtk-4.1` and `libsoup-3.0` **present** (pkg-config); webkit2gtk-4.0 absent (fine, we target 4.1).
+- Go **1.26.3**.
+
+So Phase 0's install steps were already satisfied; only scaffolding remained.
+
+### What I did
+
+- Wrote a detailed atomic `tasks.md` (Phase 0–8, each with sub-items and a commit checkpoint).
+- **Layout decision (deviation from design doc §7.1):** the design proposed `internal/desktop/` for the bound `App`. Wails generates the JS binding namespace from the *package name*, and `internal/...` packages produce awkward/hard-to-predict namespaces. To keep the demo's proven `window['go']['main']['App']` namespace (so the copied frontend works unchanged), the bound `App` lives in **`package main` at the repo root**. Pure testable helpers (CLI arg parsing, path checks) will go in `internal/desktop` later. This is layering, not an adapter.
+- Created the repo-root Wails project: `wails.json` (outputfilename `md-view`, empty frontend build/install — vanilla JS), `main.go` (`wails.Run` + `//go:embed all:frontend/dist`), `app.go` (stub `App` with `Startup`/`Shutdown` + stub bound methods: `OpenFile`, `OpenFileAtPath`, `GetCurrentFile`, `GetRecentFiles`, `ToggleTheme`, `GetTheme`, `OnFileDrop`).
+- Copied the demo's `frontend/dist/{index.html,app.js,style.css,chroma.css}` as the shell.
+- `go get github.com/wailsapp/wails/v2@v2.12.0` + `go mod tidy`. Note: tidy prunes Wails if nothing imports it — had to write `main.go` (which imports wails) *before* tidy, else wails gets removed.
+- Fixed a `.gitignore` collision: the bare `dist/` rule (for GoReleaser output) was silently ignoring `frontend/dist/`. Re-anchored it to `/dist/` (root build output only).
+
+### Why
+
+- A stub-with-window first proves the toolchain end-to-end (embed, bindings, WebView) before any rendering logic is added. Failures here are cheap to find.
+- Rooting the Wails project at the repo root (rather than a subdir) matches the demo exactly and keeps the final "single `md-view` binary" story simple (`go build .` / GoReleaser root).
+
+### What worked
+
+- `wails dev -tags webkit2_41` compiled, generated bindings, packaged, and opened a window; DevServer on `http://localhost:34115`; "Serving assets from disk: …/frontend/dist".
+- The generated `frontend/wailsjs/go/main/App.js` confirms the namespace is `window['go']['main']['App']` with all 8 stub methods bound — the copied frontend's calls will resolve.
+- Both binaries coexist during transition: `go build -tags webkit2_41 .` (new Wails app) and `go build ./cmd/md-view` (old CLI) both succeed — no package conflict from having two `main` packages.
+
+### What didn't work
+
+- **`go mod tidy` removed Wails on the first run** because no Go file imported it yet. Fix: author the importing `main.go` first, then tidy. Obvious in hindsight; recorded so it isn't repeated.
+- **`frontend/dist/` was invisible to git** due to the `dist/` ignore rule. Found via `git check-ignore -v`.
+
+### What I learned
+
+- Wails dev regenerates `frontend/wailsjs/` on every run — correctly gitignored (`/frontend/wailsjs/`) to avoid churn.
+- Two `main` packages (root + `cmd/md-view`) compile together cleanly; the cutover (Phase 7) simply deletes the old one.
+
+### What was tricky to build
+
+- The `.gitignore` `dist/` shadowing was non-obvious — `git status` just silently omitted `frontend/`, which would have meant committing a broken app (no frontend assets) if not caught. The root-anchor (`/dist/`) is the surgical fix that preserves the GoReleaser-output ignore.
+
+### What warrants a second pair of eyes
+
+- The decision to keep the bound `App` in `package main` at root (vs `internal/desktop` as the design proposed). It trades a namespace-predictability guarantee for slightly less tidy packaging; confirm this is acceptable, or move `App` into a non-`internal` subpackage (e.g. `pkg/desktop`) later — that still gives a clean `window.go.desktop.App` namespace and testability.
+- The `.gitignore` `/dist/` change — verify GoReleaser/install still output to the right place.
+
+### What should be done in the future
+
+- Revisit package layout if `package main` root grows unwieldy.
+- The stub `App` methods must be implemented in Phases 1, 3, 5, 6.
+
+### Code review instructions
+
+- Start at repo root: `main.go` (embed + `wails.Run`), `app.go` (stub `App`), `wails.json`.
+- Validate: `wails dev -tags webkit2_41` opens a window; `frontend/wailsjs/go/main/App.js` lists the 8 bound methods.
+- Confirm `.gitignore` line 18 is now `/dist/` and `frontend/dist/index.html` is tracked.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): scaffold Wails v2 app (Phase 0)".
+- `wails dev` build tag: `-tags webkit2_41` (webkit2gtk-4.1 present, 4.0 absent).
+- Embed: `//go:embed all:frontend/dist` in `main.go`.
