@@ -701,3 +701,76 @@ Phase 7 was the irreversible step: delete the daemon/protocol/server/commands pa
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): cutover — delete daemon packages, single Wails binary (Phase 7)".
 - Binary: `build/bin/md-view` (~17 MB). Deps dropped: glazed (+transitive).
+
+## Step 11: Phase 8 — reMarkable upload + toolbar buttons (bound methods)
+
+Phase 8 restored the in-page toolbar buttons (reMarkable upload, copy-path, download) by replacing the old `fetch('/upload-remarkable')` / `fetch('/raw')` calls with bound Go methods. This was the last feature gap vs the daemon model.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue"
+
+**Assistant interpretation:** Execute Phase 8: add bound `UploadToRemarkable`/`RawFile`/`DownloadMarkdown` methods (mirroring the deleted `pkg/server` handlers), and a `buttons.js` that builds the toolbar row and calls those methods instead of fetch.
+
+**Inferred user intent:** Feature parity — the reMarkable upload button and copy/download toolbar that existed in the browser version, now driven by the Wails bridge.
+
+### What I did
+
+- `app.go` — three bound methods:
+  - `UploadToRemarkable(path) (string, error)`: validate → `exec.Command("remarquee","upload","md",abs,"--non-interactive")` → return trimmed stdout, or wrapped stderr/error. Mirrors the deleted `handleUploadRemarkable`.
+  - `RawFile(path) ([]byte, error)`: `os.ReadFile` after abs resolve (mirrors `handleRaw`).
+  - `DownloadMarkdown(path) (string, error)`: read file → `runtime.SaveFileDialog` → write to chosen path (returns "" on cancel).
+- `frontend/dist/buttons.js` — `MDSInitButtons()` builds a fixed-position row (copy-path / download / reMarkable) for the current file; idempotent (removes any existing row first); calls the bound methods on click, with spinner/check/error icon states and toast feedback. Loaded via `index.html`; `app.js` calls `MDSInitButtons()` after every `showContent`.
+
+### Why
+
+- Bound methods replace HTTP: no `/upload-remarkable` route, no `fetch`, no JSON error envelope — the Wails bridge marshals `(string, error)` directly into a JS `Promise` (resolve/reject).
+- Keeping the buttons in their own `buttons.js` (separate from `augment.js`'s copy/mermaid) matches the daemon model's split and keeps each concern independently re-runnable after content swaps.
+
+### What worked
+
+- **Verified end to end via `wails dev` + Playwright:** opened `/tmp/md-view-reload.md`; the button row built (3 buttons); `UploadToRemarkable` returned `"OK: uploaded md-view-reload.pdf -> /ai/2026/06/13"`; `remarquee cloud ls /ai/2026/06/13` confirmed the file **landed on the device** (`md-view-reload`). The whole chain (button → bound method → `remarquee` → reMarkable cloud) works.
+- gofmt clean; golangci-lint **0 issues**; `make build` ok; `make test` green.
+
+### What didn't work
+
+- Nothing failed. The bound-method shape (`(string, error)` → `Promise<string>`) mapped cleanly onto the existing button logic; only the transport changed (fetch → `window.go.main.App.*`).
+
+### What I learned
+
+- The Wails bridge turns a Go `(string, error)` into a JS Promise that resolves with the string or rejects with the error string — so the frontend's `.then(msg => …)` / `.catch(e => …)` is a direct replacement for `fetch().then(r => r.json())`, with no JSON envelope needed.
+- `runtime.SaveFileDialog` is the native-dialog equivalent of an `<a download>` click; it's the right tool for "download markdown" in a desktop app (no `/raw` route needed).
+
+### What was tricky to build
+
+- **Button-row idempotency:** `MDSInitButtons` must remove any prior `#md-view-button-row` before building, or live reload / re-open stacks duplicate rows. Handled with an id + `remove()`.
+- The row positions `right: 48px` to sit beside the theme toggle (which lives at `right: 12px`); reuse the `.md-view-toolbar-btn` / `.md-view-remarkable-btn` classes from the generated `ui.css` so styling is consistent with the daemon version.
+
+### What warrants a second pair of eyes
+
+- `UploadToRemarkable` runs `remarquee` with a path validated only by `os.Stat` (no allow-list, unlike `/file/` image serving). Acceptable — it's a user-initiated upload of *their own* open file — but confirm the threat model is OK with it (the daemon version had the same posture).
+- `DownloadMarkdown` writes to an arbitrary user-chosen path; standard desktop save-dialog behavior, no sandboxing. Fine for a local viewer.
+
+### What should be done in the future
+
+- Replace the favicon 404 (add a 204 handler or a real favicon asset).
+- Consider persisting theme preference (OQ-2) — `PendingDark`/`ToggleTheme` already maintain `a.theme`; saving it to the config JSON would make it sticky.
+- Full cross-platform smoke test (macOS/Windows) for the `/file/` path handling and `SaveFileDialog`.
+
+### Code review instructions
+
+- `app.go`: `UploadToRemarkable`, `RawFile`, `DownloadMarkdown` (+ imports: bytes/errors/os/os/exec/strings).
+- `frontend/dist/buttons.js` (new): `MDSInitButtons`.
+- `frontend/dist/{index.html,app.js}`: load `buttons.js`; call `MDSInitButtons()` in `showContent`.
+- Validate: `wails dev -tags webkit2_41`; open a file; the 3 buttons appear; reMarkable button uploads (verify with `remarquee cloud ls`).
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): reMarkable + toolbar buttons via bound methods (Phase 8)".
+- Verification: uploaded `md-view-reload` to `/ai/2026/06/13` on the device via the button's bound method.
+
+---
+
+## Phase summary (all 9 phases complete)
+
+Phases 0–8 are done. `md-view` is now a single ~17 MB Wails v2 binary, drop-in at the CLI (`md-view view <file> [--dark]`), with: dual-theme GitHub styling, Chroma syntax highlighting, Mermaid diagrams, frontmatter rendering, live reload, image serving (allow-listed), copy-to-clipboard, menus, drag-and-drop, recent-files persistence, and reMarkable upload + toolbar buttons. The daemon/socket/HTTP/PID packages are deleted. Build is `wails build` (via `make build`). Known limitation: `SingleInstanceLock` does not dedupe on this Linux/D-Bus setup (2nd invocation opens a new window) — accepted per user decision.

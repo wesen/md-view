@@ -1,9 +1,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/go-go-golems/md-view/pkg/renderer"
@@ -235,6 +240,70 @@ func (a *App) ToggleTheme() string {
 // GetTheme returns the current theme name.
 func (a *App) GetTheme() string {
 	return a.theme
+}
+
+// UploadToRemarkable uploads the given markdown file to a reMarkable device via
+// the `remarquee upload md` CLI. Returns the remarquee stdout (the upload
+// result message). Mirrors pkg/server.handleUploadRemarkable (deleted in the
+// cutover): validate path -> exec remarquee -> return output / wrapped error.
+func (a *App) UploadToRemarkable(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return "", fmt.Errorf("file not found: %s", abs)
+	}
+	cmd := exec.Command("remarquee", "upload", "md", abs, "--non-interactive") // #nosec G702 -- fixed args; path validated above
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		errMsg := strings.TrimSpace(stderr.String())
+		if errMsg == "" {
+			errMsg = err.Error()
+		}
+		logger.Error().Str("file", abs).Str("error", errMsg).Msg("reMarkable upload failed")
+		return "", errors.New(errMsg)
+	}
+	output := strings.TrimSpace(stdout.String())
+	logger.Info().Str("file", abs).Str("output", output).Msg("reMarkable upload succeeded")
+	return output, nil
+}
+
+// RawFile returns the raw bytes of a markdown file (used by the toolbar's
+// "download markdown" button). Mirrors pkg/server.handleRaw (deleted).
+func (a *App) RawFile(path string) ([]byte, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("invalid path: %w", err)
+	}
+	return os.ReadFile(abs)
+}
+
+// DownloadMarkdown writes the given markdown file to a user-chosen location via
+// a native save dialog, returning the chosen path ("" if cancelled). Used by
+// the toolbar's "download" button as a friendlier alternative to RawFile.
+func (a *App) DownloadMarkdown(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	data, err := os.ReadFile(abs)
+	if err != nil {
+		return "", err
+	}
+	dest, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save Markdown",
+		DefaultFilename: filepath.Base(abs),
+	})
+	if err != nil {
+		return "", fmt.Errorf("save dialog error: %w", err)
+	}
+	if dest == "" {
+		return "", nil // user cancelled
+	}
+	return dest, os.WriteFile(dest, data, 0o644)
 }
 
 // OnFileDrop is called when the user drops a file onto the window (requires

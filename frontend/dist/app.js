@@ -112,6 +112,9 @@ function showContent(html) {
     // Re-run content augmentation (copy buttons + mermaid) against the new DOM.
     // The page chrome is stable; only #content is swapped per file / reload.
     if (window.MDSAugmentPage) window.MDSAugmentPage();
+    // Rebuild the fixed-position toolbar buttons (reMarkable/copy/download) for
+    // the newly current file path.
+    if (window.MDSInitButtons) window.MDSInitButtons();
 
     // Update the filename display in the toolbar
     window['go']['main']['App']['GetCurrentFile']()
