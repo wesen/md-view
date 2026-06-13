@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-go-golems/md-view/pkg/renderer"
 	"github.com/go-go-golems/md-view/pkg/watcher"
+	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -23,6 +24,11 @@ type App struct {
 	mu          sync.Mutex
 	watched     map[string]struct{} // files already watched (avoid duplicate watches)
 	allowedDirs map[string]struct{} // directories images may be served from (DR-5)
+
+	// PendingOpen is the file requested on the command line before the WebView
+	// was ready (first instance). OnDomReady opens it. Empty = open empty window.
+	PendingOpen string
+	PendingDark bool
 }
 
 // NewApp creates a new App instance with default values.
@@ -56,6 +62,80 @@ func (a *App) Shutdown(_ context.Context) {
 	a.saveRecentFiles()
 	if a.watcher != nil {
 		_ = a.watcher.Close()
+	}
+}
+
+// OnDomReady is called once the WebView DOM is ready. It opens the file
+// requested on the command line (PendingOpen), which couldn't be rendered
+// during Startup because the window didn't exist yet. This is what makes
+// `md-view view README.md` actually display the file on first launch.
+func (a *App) OnDomReady(_ context.Context) {
+	if a.PendingOpen == "" {
+		return
+	}
+	file := a.PendingOpen
+	dark := a.PendingDark
+	a.PendingOpen = ""
+	a.PendingDark = false
+	if dark {
+		a.theme = "dark"
+		runtime.EventsEmit(a.ctx, "theme-changed", a.theme)
+	}
+	html, err := a.openPath(file)
+	if err != nil {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "file-error", err.Error())
+		}
+		return
+	}
+	if html != "" && a.ctx != nil {
+		runtime.EventsEmit(a.ctx, "file-opened", map[string]string{
+			"html":  html,
+			"path":  a.currentFile,
+			"title": a.currentFileTitle(),
+		})
+	}
+}
+
+// OnSecondInstanceLaunch is the SingleInstanceLock callback: Wails calls it
+// in instance #1 when a second `md-view` starts, forwarding the 2nd process's
+// os.Args. We parse them as `view` args and open the file in THIS window —
+// this is the drop-in mechanism that replaces the daemon's "reuse running
+// server" behavior with zero filesystem state.
+func (a *App) OnSecondInstanceLaunch(data options.SecondInstanceData) {
+	args := ParseViewArgs(data.Args)
+	if args.File == "" {
+		// No file requested — just bring the existing window forward.
+		if a.ctx != nil {
+			runtime.WindowShow(a.ctx)
+		}
+		return
+	}
+	// Resolve a relative path against the 2nd instance's working directory.
+	file := args.File
+	if data.WorkingDirectory != "" && !filepath.IsAbs(file) {
+		file = filepath.Join(data.WorkingDirectory, file)
+	}
+	if args.Dark {
+		a.theme = "dark"
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "theme-changed", a.theme)
+		}
+	}
+	html, err := a.openPath(file)
+	if err != nil {
+		if a.ctx != nil {
+			runtime.EventsEmit(a.ctx, "file-error", err.Error())
+		}
+		return
+	}
+	if html != "" && a.ctx != nil {
+		runtime.WindowShow(a.ctx)
+		runtime.EventsEmit(a.ctx, "file-opened", map[string]string{
+			"html":  html,
+			"path":  a.currentFile,
+			"title": a.currentFileTitle(),
+		})
 	}
 }
 

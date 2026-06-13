@@ -56,11 +56,12 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 6 — Single-instance CLI dispatch + `view` command (DR-7, DR-8)
 
-- [ ] 6.1 Add `SingleInstanceLock` to `wails.Run`; implement `OnSecondInstanceLaunch` → `ParseViewArgs` → `openPath`/`WindowShow`
-- [ ] 6.2 Cobra `view` command + bare `md-view` root → `wails.Run` with `PendingOpen`; open in `OnDomReady`
-- [ ] 6.3 Trim flags (keep `--dark`; remove/error `--browser`/`--no-browser`/`--port`)
-- [ ] 6.4 Verify: `md-view view a.md` then `md-view view b.md --dark` reuses window
-- [ ] 6.5 Commit
+- [x] 6.1 `SingleInstanceLock` wired + `OnSecondInstanceLaunch` → `ParseViewArgs` → `openPath`/`WindowShow` (code correct per Wails API; **known limitation**: did not dedupe on this Linux/D-Bus setup — 2nd invocation opens a new window; user accepts multiple windows)
+- [x] 6.2 Cobra `view` command + bare `md-view` root → `wails.Run` with `PendingOpen`; opened in `OnDomReady`
+- [x] 6.3 Flags trimmed (keep `--dark`; `view` uses `cobra.MaximumNArgs(1)`)
+- [x] 6.4 Verify: `wails build` then `build/bin/md-view view README.md` opens window titled `md-view: README.md`; `--dark` works; `ParseViewArgs` 8 unit tests green
+- [x] 6.5 Commit
+- [ ] **FINDING (Phase 7 blocker):** production binary MUST be built via `wails build`, NOT plain `go build` (missing Wails build tags → refuses to start). Repoint Makefile/GoReleaser/CI in Phase 7.
 
 ## Phase 7 — Cutover: delete old packages, single binary
 

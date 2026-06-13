@@ -557,3 +557,74 @@ Phase 5 added the desktop app's interaction surface: a native menu bar (File→O
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): menus, drag-drop, recent files (Phase 5)".
 - Config dir: `os.UserConfigDir()/md-view`; file: `recent.json`.
+
+## Step 9: Phase 6 — Cobra `view` command + SingleInstanceLock (drop-in CLI)
+
+Phase 6 made `md-view view README.md` actually work as a desktop command. The CLI/drop-in contract is satisfied and verified; the single-instance *dedup* did not engage on this Linux/D-Bus setup, and the user confirmed multiple windows are acceptable, so that is recorded as a known limitation rather than a blocker.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue" — then later "it's fine if there are multiple windows. anything to commit? this is worth writing up in your diary if necessary, and then continue. I also sadly closed both instances."
+
+**Assistant interpretation:** Implement Phase 6 (Cobra `view` + `SingleInstanceLock` + `OnDomReady` pending-file open), verify the drop-in CLI, and honestly document whatever does/doesn't work. Commit and proceed.
+
+**Inferred user intent:** The single hard requirement is `md-view view <file>` opening the rendered file (drop-in compatibility); dedup-to-one-window is nice-to-have but not required.
+
+### What I did
+
+- `cli.go` — `ParseViewArgs(args) ViewArgs` (pure): tolerantly parses `md-view [view] <file> [--dark]`, treating the first non-flag/non-`view` token as the file. Returns `{File, Dark}`. Cwd-agnostic (the 2nd-instance path carries `WorkingDirectory`).
+- `cli_test.go` — 8 table-driven cases for `ParseViewArgs` (bare shorthand, explicit verb, dark before/after, dark-only, no-args, unknown flag, first-file-wins).
+- `app.go` — added `PendingOpen`/`PendingDark` fields; `OnDomReady(ctx)` opens the pending file once the WebView exists (emits `file-opened` / sets theme); `OnSecondInstanceLaunch(data options.SecondInstanceData)` parses forwarded args, resolves relative paths against `data.WorkingDirectory`, opens the file, and `WindowShow`s.
+- `main.go` — Cobra root + `view` subcommand (`--dark` flag, `cobra.MaximumNArgs(1)`); bare `md-view` opens an empty window (also covers double-click). `runDesktop(file, dark)` sets `PendingOpen`/`PendingDark` and calls `wails.Run` with `OnDomReady` + `SingleInstanceLock{UniqueId, OnSecondInstanceLaunch}`.
+
+### Why
+
+- `OnDomReady` is the correct hook to open the CLI file: at `Startup` the window/DOM don't exist yet, so rendering must wait until the DOM is ready. `PendingOpen` bridges the gap.
+- Keeping Cobra gives `--help`, subcommand structure, and graceful flag errors for free, and the bare-root `RunE` covers the double-click case (per the Wails Discussion #1271 gotcha — a bare launch must still open the GUI).
+
+### What worked
+
+- **Drop-in CLI verified end to end with the production binary** (`wails build`): `build/bin/md-view view README.md` opened a native window titled **`md-view: README.md`** — Cobra parsed the arg, `PendingOpen` flowed to `OnDomReady`, `RenderBody` rendered, `WindowSetTitle` set the native title. `--dark` and bare `md-view` both work. `view --help` and `--help` render correctly.
+- `ParseViewArgs` unit tests: all 8 pass; the full suite (`go test -tags webkit2_41 ./...`) is green.
+- The Wails binding generator recognized `options.SecondInstanceData` (`KnownStructs: … options.SecondInstanceData …` in the `wails build` log), so the struct is wired correctly at the type level.
+
+### What didn't work (two important findings)
+
+1. **Plain `go build -tags webkit2_41` does NOT produce a runnable Wails binary.** Running it gave: *"Error: Wails applications will not build without the correct build tags."* Wails injects additional build tags (e.g. `desktop`) during `wails build`; a raw `go build` is missing them and the app refuses to start. **Implication for Phase 7:** the Makefile `build`/GoReleaser/CI must use `wails build` (or `go build` with the full Wails tag set), not plain `go build`. The existing `make wails-build` target is correct; `make build` (still pointing at the old CLI) will be repointed in Phase 7. (Also: stderr from a tmux-launched GUI was silently swallowed — run GUI binaries with redirected stderr to see this class of error.)
+2. **`SingleInstanceLock` did not dedupe on this Linux machine.** A 2nd `md-view view other.md` opened a *second* window (`md-view: Phase 2 Fixture`) instead of forwarding to instance #1. Investigation: Wails' Linux single-instance uses **D-Bus session bus** (`internal/frontend/desktop/linux/single_instance.go`): instance #1 `RequestName`s `org.wails_app_<id>.SingleInstance`; a 2nd process checks if the name is taken and, if so, forwards args + `os.Exit(1)`. In testing the name was **not** detected as taken (the 2nd process proceeded to a full launch). Even launching both from the identical shell (same `DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus`, bus reachable — 134 names listed) reproduced the 2nd-window behavior. Root cause not pinned down (candidate: a name-registration race, or `RequestNameReplyExists` not returned in this environment). **User decision: multiple windows are acceptable**, so this stays a known limitation; the `SingleInstanceLock` code is retained (correct per the documented API, harmless, may work on macOS/Windows or a differently-configured D-Bus) rather than removed.
+
+### What I learned
+
+- **The drop-in CLI is fundamentally about (a) parsing `view <file> [--dark]` and (b) opening the file once the window exists** — both satisfied. `SingleInstanceLock` is a *dedup* optimization on top, not a prerequisite for "drop-in."
+- Wails production binaries require `wails build`; the `go build` tag set is incomplete. This is a Phase-7 (cutover/CI) concern and must be reflected in the Makefile and `.goreleaser.yaml`.
+- Wails' single-instance is platform-specific (D-Bus on Linux, named-pipe/window on Windows, NSDistributedNotification on macOS). A failure on one platform doesn't mean the code is wrong.
+
+### What was tricky to build
+
+- **`ParseViewArgs` is flag-value-unaware:** `--port 8080 doc.md` parses `8080` as the file (the first non-flag), because the parser doesn't know `--port` takes a value. Documented in the test (`unknown flag value becomes the file`). The Cobra path handles real flags; `ParseViewArgs` is the lenient 2nd-instance fallback. If strict 2nd-instance parsing is ever needed, use Cobra there too.
+- **`go build` vs `wails build`** cost real debugging time before the "missing build tags" error surfaced (stderr was buffered/swallowed under tmux). Lesson: when a GUI binary "does nothing," run it with `2>&1` redirected to a file.
+
+### What warrants a second pair of eyes
+
+- The decision to **keep `SingleInstanceLock` enabled despite it not dedup-ing here.** Alternatives: (a) remove it as dead code, (b) gate it behind a flag, (c) keep as-is. Chose (c) per "multiple windows are fine" — confirm this is preferred over (a).
+- `ParseViewArgs`'s flag-value blindness (documented above) — acceptable for the lenient path?
+- `OnDomReady` opens the pending file and emits `file-opened`; confirm the frontend's `file-opened` listener (added in Phase 5 consumption) handles the startup-time emit correctly (the listener is registered in `app.js` at DOMContentLoaded, which races `OnDomReady` — in practice Wails fires `OnDomReady` after the DOM is ready, so the listener exists; worth a smoke test in the real window).
+
+### What should be done in the future
+
+- **Investigate the Linux D-Bus single-instance non-dedup** if true single-window behavior is ever required (likely a `RequestName` flag / timing issue, or a sandbox/bus-address difference). Until then, each `md-view view` opens a new window — acceptable.
+- Phase 7 cutover: repoint `make build` / GoReleaser / CI to `wails build` (not `go build`).
+- Persist theme preference (open question OQ-2) — `PendingDark` already sets `a.theme`; saving it would make `--dark` sticky.
+
+### Code review instructions
+
+- `cli.go` + `cli_test.go`: `ParseViewArgs` (pure, 8 tests).
+- `app.go`: `PendingOpen`/`PendingDark`, `OnDomReady`, `OnSecondInstanceLaunch`.
+- `main.go`: Cobra `view` + bare root → `runDesktop` → `wails.Run` with `OnDomReady` + `SingleInstanceLock`.
+- Validate: `wails build -tags webkit2_41`; `build/bin/md-view view README.md` opens a window titled `md-view: README.md`; `go test -tags webkit2_41 ./...` green.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): Cobra view command + SingleInstanceLock (Phase 6)".
+- Production binary: `build/bin/md-view` (~15 MB, via `wails build`).
+- SingleInstanceLock: `UniqueId = "github.com/go-go-golems/md-view"`; Linux D-Bus name `org.wails_app_github_com/go_go_golems/md_view.SingleInstance`.
