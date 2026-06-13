@@ -41,10 +41,10 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 4 — Image serving (DR-5)
 
-- [ ] 4.1 Implement `App.ServeReferencedFile` + `allowedDirs` (mirror `server.go:418`), wire into `AssetServer.Handler`
-- [ ] 4.2 Confirm `rewriteImagePaths` emits `/file/<abs>` (port-independent)
-- [ ] 4.3 Verify: relative image renders; traversal path → 403
-- [ ] 4.4 Commit
+- [x] 4.1 Implement `App.ServeReferencedFile` + `allowedDirs` (mirror `server.go:418`), wire into `AssetServer.Handler` via `http.HandlerFunc`
+- [x] 4.2 Confirmed `rewriteImagePaths` emits port-independent `/file/<abs>` (renderer unchanged)
+- [x] 4.3 Verify: relative image renders (fetch → 200); traversal `/file/etc/passwd` → 403
+- [x] 4.4 Commit
 
 ## Phase 5 — Menus, drag-and-drop, recent files, window title
 

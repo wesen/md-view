@@ -3,6 +3,7 @@ package main
 import (
 	"embed"
 	"log"
+	"net/http"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -26,7 +27,8 @@ func main() {
 		MinWidth:  480,
 		MinHeight: 360,
 		AssetServer: &assetserver.Options{
-			Assets: assets,
+			Assets:  assets,
+			Handler: http.HandlerFunc(app.ServeReferencedFile), // serves /file/<abs> images (DR-5)
 		},
 		OnStartup:  app.Startup,
 		OnShutdown: app.Shutdown,

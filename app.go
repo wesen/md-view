@@ -22,6 +22,7 @@ type App struct {
 	watcher     *watcher.FileWatcher // fsnotify wrapper for live reload
 	mu          sync.Mutex
 	watched     map[string]struct{} // files already watched (avoid duplicate watches)
+	allowedDirs map[string]struct{} // directories images may be served from (DR-5)
 }
 
 // NewApp creates a new App instance with default values.
@@ -30,6 +31,7 @@ func NewApp() *App {
 		theme:       "light",
 		recentFiles: []string{},
 		watched:     map[string]struct{}{},
+		allowedDirs: map[string]struct{}{},
 	}
 }
 
@@ -98,6 +100,7 @@ func (a *App) openPath(path string) (string, error) {
 
 	a.currentFile = abs
 	a.watchFile(abs)
+	a.addAllowedDir(filepath.Dir(abs))
 	runtime.WindowSetTitle(a.ctx, "md-view: "+body.Title)
 
 	html := body.Body

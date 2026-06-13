@@ -424,3 +424,68 @@ Phase 3 restored the "edit the file, the view refreshes" behavior without any HT
 
 - Commit (this step): see `git log` for "feat(MD-WAILS): live reload via Wails events (Phase 3)".
 - Event name: `file-changed`; payload `{path string}`.
+
+## Step 7: Phase 4 — image serving via AssetServer.Handler + allow-list (DR-5)
+
+Phase 4 made relative Markdown images (`![](images/x.png)`) render in the window, by answering the `/file/<abs>` URLs that `renderer.rewriteImagePaths` already emits, through a Wails `AssetServer.Handler` backed by an allow-list.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 3 — work through the tasks, diary, commit.)
+
+**Assistant interpretation:** Execute Phase 4: implement `App.ServeReferencedFile` + an `allowedDirs` allow-list mirroring `pkg/server.handleFileServing` (server.go:418), and wire it as the Wails `AssetServer.Handler`.
+
+**Inferred user intent:** Images in rendered Markdown load from the open file's directory, with the same path-traversal protection as the daemon model.
+
+### What I did
+
+- Added `allowedDirs map[string]struct{}` to `App`; `openPath` calls `addAllowedDir(filepath.Dir(abs))` on open (mirrors server.go:286-294).
+- Created `assets.go` with `addAllowedDir`, `isAllowed` (prefix check with `+filepath.Separator` to avoid `/tmp/foo` authorizing `/tmp/foobar`), and `ServeReferencedFile` (the `AssetServer.Handler`): serves `/file/<abs>` requests via `http.ServeContent` after the allow check; non-`/file/` → 404; disallowed → 403.
+- Wired `Handler: http.HandlerFunc(app.ServeReferencedFile)` into `main.go`'s `AssetServer.Options`.
+
+### Why
+
+- `renderer.rewriteImagePaths` already rewrites relative `<img src>` to `/file/<abs-path>` (port-independent — confirmed in Phase 1). Reusing that scheme means zero renderer change; only the *responder* for `/file/...` moves from `pkg/server` to `App`.
+- The allow-list is the security boundary: only directories of opened files (and their ancestors, in the daemon model) may be read. Kept the same check to preserve the trust model.
+
+### What worked
+
+- Verified end to end via `wails dev` browser mode + Playwright against `/tmp/md-img-test/README.md` (with `images/diagram.png`): the renderer rewrote `src` to `/file/tmp/md-img-test/images/diagram.png`; `fetch(src)` returned **200**; a traversal `fetch('/file/etc/passwd')` returned **403**. Both the happy path and the security guard pass.
+- gofmt clean; `go build -tags webkit2_41 ./...` ok; `go test ./...` green.
+
+### What didn't work
+
+- **First wire attempt: `Handler: app`** — `*App` doesn't implement `http.Handler` (no `ServeHTTP`). Fix: `Handler: http.HandlerFunc(app.ServeReferencedFile)`. Cleaner than bolting `ServeHTTP` onto `App`.
+- **Import scoping:** I initially added `net/http`/`os`/`strings` to `app.go`, but those are used in `assets.go` (where the handler lives), leaving them unused in `app.go`. Reverted `app.go`'s imports to its actual usage; `assets.go` owns its own imports. One package, multiple files — imports are per-file in Go, which I momentarily forgot.
+
+### What I learned
+
+- Wails' `assetserver.Options.Handler` is an `http.Handler` consulted only for requests the embedded `Assets` (`embed.FS`) can't satisfy. So `/file/...` reaches our handler, while `/app.js`, `/style.css`, etc. are served from `embed.FS` first — no collision risk with frontend asset names (as long as none is named under `/file/`).
+- `http.ServeFile` redirects to "clean" the URL, breaking absolute paths with a leading slash; `http.ServeContent` does not. Same choice the daemon made (server.go comment).
+
+### What was tricky to build
+
+- **The `+filepath.Separator` detail in `isAllowed`** is the difference between "safe" and "directory-confusion vulnerable": `strings.HasPrefix("/tmp/foobad", "/tmp/foo")` is true without the separator. The daemon had this right; preserved exactly.
+- Per-file imports in a multi-file package (documented above).
+
+### What warrants a second pair of eyes
+
+- The allow-list grows monotonically (no eviction). For a single-window viewer this is fine; if multi-file is added, evict on close.
+- Symlinks: `isAllowed` checks the *requested* path, not `filepath.EvalSymlinks`. The daemon model had the same limitation. A symlink inside an allowed dir pointing outside would currently be followed. Documented as a follow-up; acceptable parity for now.
+
+### What should be done in the future
+
+- Harden with `filepath.EvalSymlinks` before the allow check if the threat model demands it.
+- Phase 5: menus, drag-and-drop, recent files, window title.
+
+### Code review instructions
+
+- `assets.go` (new): `addAllowedDir`, `isAllowed`, `ServeReferencedFile`.
+- `app.go`: `allowedDirs` field, `openPath` calls `addAllowedDir`.
+- `main.go`: `Handler: http.HandlerFunc(app.ServeReferencedFile)`.
+- Validate: `wails dev -tags webkit2_41`; open a file with a relative image; the image renders; `fetch('/file/etc/passwd')` → 403.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): image serving via AssetServer.Handler (Phase 4)".
+- Handler type: `http.Handler`; adapter: `http.HandlerFunc`.
