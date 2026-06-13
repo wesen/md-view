@@ -628,3 +628,76 @@ Phase 6 made `md-view view README.md` actually work as a desktop command. The CL
 - Commit (this step): see `git log` for "feat(MD-WAILS): Cobra view command + SingleInstanceLock (Phase 6)".
 - Production binary: `build/bin/md-view` (~15 MB, via `wails build`).
 - SingleInstanceLock: `UniqueId = "github.com/go-go-golems/md-view"`; Linux D-Bus name `org.wails_app_github_com/go_go_golems/md_view.SingleInstance`.
+
+## Step 10: Phase 7 — cutover (delete old packages, single binary)
+
+Phase 7 was the irreversible step: delete the daemon/protocol/server/commands packages and the old `cmd/md-view` entry, leaving a single Wails binary as `md-view`. Build infrastructure (Makefile, GoReleaser, CI, AGENT.md) was repointed to `wails build`.
+
+### Prompt Context
+
+**User prompt (verbatim):** "continue"
+
+**Assistant interpretation:** Execute Phase 7: delete `pkg/{daemon,protocol,server,commands}` + `cmd/md-view/main.go`, confirm the single binary builds and the drop-in CLI still works, and update Makefile/`.goreleaser.yaml`/CI/`AGENT.md` to reflect the Wails-only build.
+
+**Inferred user intent:** Complete the replacement — one `md-view` binary, no daemon remnants, build/CI consistent.
+
+### What I did
+
+- Verified the dependency graph first: the only importers of the doomed packages were *internal* to them (`commands`→`daemon`/`protocol`/`server`; `server`→`daemon`/`protocol`; `cmd/md-view`→`commands`). The new root `main.go`/`app.go` reference them only in comments. Safe to delete.
+- `git rm -r cmd/md-view pkg/daemon pkg/protocol pkg/server pkg/commands`. Surviving Go: root `main` package, `pkg/renderer`, `pkg/watcher`, `cmd/gen-chroma-css`.
+- `go mod tidy` — dropped `github.com/go-go-golems/glazed` (the old CLI framework) and its transitive deps. Direct deps now: chroma, fsnotify, logcopter, cobra, wails, goldmark, goldmark-highlighting.
+- **Makefile:** `build` now depends on `frontend-css` and runs `wails build -tags webkit2_41` (NOT `go build` — per the Phase 6 finding); `run` uses `build/bin/md-view view`; `test` uses `-tags webkit2_41`; removed `glazed-lint`/`bump-glazed`/`serve` dev target; `clean` drops `build/bin`.
+- **`.goreleaser.yaml`:** `main: .` (was `./cmd/md-view`); added `flags: [-tags=webkit2_41,desktop,production]` (linux) / `[-tags=desktop,production]` (darwin); `before` hooks run the CSS generator; updated brew/nfpm descriptions (no more "daemon"/"browser").
+- **CI:** `push.yml` installs `libwebkit2gtk-4.1-dev`+`libsoup-3.0-dev`, regenerates CSS, and runs `go test -tags webkit2_41 ./...`; `lint.yml` installs the webkit deps, lints `. ./cmd/... ./pkg/...`, and dropped the `make glazed-lint` step (glazed removed).
+- **`AGENT.md`:** rewrote Build Commands + Project Structure for the Wails single-binary model.
+- Removed an unused `viewFlags` type lint flagged in `main.go`.
+
+### Why
+
+- The cutover is the whole point of "drop-in replacement": one binary named `md-view`, no daemon/socket/PID state, no `serve`/`stop`/`status`. Keeping the old packages would contradict the single-binary story and leave dead code.
+- `wails build` (not `go build`) is mandatory — the Phase 6 finding. Bake that into every build path so no one hits the "will not build without the correct build tags" error again.
+
+### What worked
+
+- **End-to-end cutover verified:** `make build` → `build/bin/md-view` (17 MB); `build/bin/md-view view README.md` opens a native window titled `md-view: README.md`. The single binary is the drop-in replacement.
+- `go test -tags webkit2_41 ./...` green (renderer + cli tests); `golangci-lint run` **0 issues**.
+- `go mod tidy` cleanly removed glazed + transitive deps — a real simplification.
+
+### What didn't work
+
+- **Lint flagged an unused `viewFlags` type** in `main.go` (a vestige from an earlier draft before I switched to a bare `viewDark` var). Removed it. Lesson: run lint before committing; dead code from iterative refactoring is easy to leave behind.
+- The Phase 6 `SingleInstanceLock` non-dedup finding carries forward (documented in Step 9); not re-litigated here. Multiple windows remain acceptable.
+
+### What I learned
+
+- The dependency graph was cleanly layered: deleting 5 dirs touched nothing outside them. This is a direct payoff of the Phase 1 `RenderBody` refactor keeping `pkg/renderer` decoupled from `pkg/server` — the renderer survived the cutover unchanged.
+- GoReleaser can build a Wails app with explicit `-tags=desktop,production` (+`webkit2_41` on linux) — `wails build` is a thin wrapper around `go build` with those tags + asset bundling. The goreleaser path won't bundle the Wails installers/icons, but produces a working binary; full Wails packaging (`.app`/`.dmg`/NSIS) is a future follow-up if needed.
+
+### What was tricky to build
+
+- **CI build-tag propagation:** `go test ./...` without `-tags webkit2_41` fails to compile the root `main` (Wails' `//go:build` constraints). Every CI/test/lint path needs the tag, plus the webkit dev libs for CGO. Easy to miss one.
+- GoReleaser's `flags:` vs Wails' own build tags: had to enumerate `desktop,production` explicitly since goreleaser doesn't run `wails build`.
+
+### What warrants a second pair of eyes
+
+- The GoReleaser `-tags=desktop,production` (darwin) / `webkit2_41,desktop,production` (linux) set — these are the tags `wails build` injects, but I inferred them; a real `goreleaser` release run (or comparing `wails build -verbose` output) should confirm the exact set before cutting a release.
+- Whether to add a dedicated `wails build` CI job (in addition to the goreleaser path) for proper asset bundling.
+- macOS/Windows path handling in `assets.go` (`/file/...` leading-slash stripping) is Unix-shaped — untested on Win/mac.
+
+### What should be done in the future
+
+- Phase 8: reMarkable upload + toolbar buttons (bound methods replacing the old `fetch('/upload-remarkable')`).
+- Replace the favicon 404 (add a 204 handler or a real favicon).
+- Full Wails packaging in CI (`.app`/`.dmg`/NSIS) if cross-platform installers are wanted.
+- Revisit `SingleInstanceLock` dedup on Linux/D-Bus if single-window behavior becomes required.
+
+### Code review instructions
+
+- Deletions: `git show --stat <this commit>` — `cmd/md-view`, `pkg/{daemon,protocol,server,commands}` removed.
+- `Makefile` (`build`/`run`/`test`/`clean`/`install` rewritten; `frontend-css`/`wails-dev` targets), `.goreleaser.yaml` (`main: .`, build tags, descriptions), `.github/workflows/{push,lint}.yml` (webkit deps + tags), `AGENT.md`.
+- Validate: `make build && build/bin/md-view view README.md` opens `md-view: README.md`; `make test`; `make lint`.
+
+### Technical details
+
+- Commit (this step): see `git log` for "feat(MD-WAILS): cutover — delete daemon packages, single Wails binary (Phase 7)".
+- Binary: `build/bin/md-view` (~17 MB). Deps dropped: glazed (+transitive).

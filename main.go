@@ -24,13 +24,6 @@ var assets embed.FS
 // daemon's "reuse running server over a Unix socket" with zero filesystem state.
 const singleInstanceID = "github.com/go-go-golems/md-view"
 
-// viewFlags holds the parsed `md-view view` flags. The compatibility surface
-// is `view <file> [--dark]`; browser/port flags from the old CLI are removed
-// (DR-8) and unknown flags are tolerated by ParseViewArgs.
-type viewFlags struct {
-	dark bool
-}
-
 var (
 	viewDark bool
 )

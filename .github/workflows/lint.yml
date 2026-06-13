@@ -27,10 +27,10 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: install webkit2gtk-4.1 dev libs (for CGO Wails build)
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version-file: .golangci-lint-version
-          args: --timeout=5m ./cmd/... ./pkg/...
-      - name: Run Glazed CLI policy linters
-        run: make glazed-lint
+          args: --timeout=5m . ./cmd/... ./pkg/...

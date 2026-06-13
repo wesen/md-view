@@ -5,6 +5,8 @@ before:
   hooks:
     - go mod tidy
     - go generate ./...
+    # Regenerate the frontend CSS that wails build embeds.
+    - go run -tags webkit2_41 ./cmd/gen-chroma-css
 builds:
   - id: md-view-linux
     env:
@@ -15,8 +17,11 @@ builds:
       - CXX_linux_arm64=aarch64-linux-gnu-g++
       - 'CC={{ index .Env (print "CC_" .Os "_" .Arch) }}'
       - 'CXX={{ index .Env (print "CXX_" .Os "_" .Arch) }}'
-    main: ./cmd/md-view
+    main: .
     binary: md-view
+    # Wails requires its build tags (a raw go build refuses to start).
+    flags:
+      - -tags=webkit2_41,desktop,production
     goos:
       - linux
     goarch:
@@ -25,8 +30,10 @@ builds:
   - id: md-view-darwin
     env:
       - CGO_ENABLED=1
-    main: ./cmd/md-view
+    main: .
     binary: md-view
+    flags:
+      - -tags=desktop,production
     goos:
       - darwin
     goarch:
@@ -49,7 +56,7 @@ signs:
 
 brews:
   - name: md-view
-    description: "A markdown viewer that just works — one command, beautiful rendering, browser opens automatically"
+    description: "A markdown viewer desktop app — renders .md files in a native window"
     homepage: "https://github.com/go-go-golems/md-view"
     repository:
       owner: go-go-golems
@@ -65,16 +72,17 @@ nfpms:
     maintainer: Manuel Odendahl <wesen@ruinwesen.com>
 
     description: |-
-      md-view is a markdown viewer daemon that renders .md files in your browser.
+      md-view is a markdown viewer desktop application (Wails v2).
 
       Features:
       - One command: md-view view file.md
-      - Background daemon with auto-start
+      - Native desktop window (WebKitGTK / WKWebView / WebView2)
       - GitHub-flavored rendering with syntax highlighting
       - Mermaid diagram support
       - Dark theme toggle
       - Live reload on file change
       - Frontmatter support
+      - Drag-and-drop, recent files
 
     license: MIT
 

@@ -20,5 +20,9 @@ jobs:
           cache: true
       - name: generate assets
         run: go generate ./...
+      - name: install webkit2gtk-4.1 dev libs (for CGO Wails build)
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libsoup-3.0-dev
+      - name: regenerate frontend css
+        run: go run -tags webkit2_41 ./cmd/gen-chroma-css
       - name: run unit tests
-        run: go test ./...
+        run: go test -tags webkit2_41 ./...

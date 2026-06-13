@@ -2,29 +2,34 @@
 
 ## Build Commands
 
-- Run: `go run ./cmd/md-view`
-- Build: `go build -o md-view ./cmd/md-view` or `make build`
-- Test: `go test ./...` or `make test`
-- Run single test: `go test ./pkg/path/to/package -run TestName`
-- Generate: `go generate ./...`
+md-view is a **Wails v2 desktop application** (single binary, since the MD-WAILS cutover). It MUST be built with `wails build`, not plain `go build` — Wails injects build tags a raw `go build` omits (the binary refuses to start otherwise).
+
+- Run (dev, hot-reload): `wails dev -tags webkit2_41` or `make wails-dev`
+- Build (production): `make build` (runs `make frontend-css` then `wails build -tags webkit2_41`) → `build/bin/md-view`
+- View a file: `build/bin/md-view view README.md` (or `--dark`)
+- Test: `go test -tags webkit2_41 ./...` or `make test`
+- Run single test: `go test -tags webkit2_41 . -run TestParseViewArgs`
+- Regenerate frontend CSS: `make frontend-css` (writes `frontend/dist/chroma.css` + `ui.css`)
 - Lint: `make lint`
 - Format: `go fmt ./...`
-- GoReleaser snapshot: `make goreleaser`
 
-IMPORTANT: To run the server and do some interaction with it, use tmux, this makes it very easy to kill a server.
-Use capture-pane to read the output.
+Linux requires `libwebkit2gtk-4.1-dev` + `libsoup-3.0-dev` (hence `-tags webkit2_41`).
+
+IMPORTANT: To run the app and interact with it, use tmux so it's easy to kill. Use capture-pane to read output. When verifying bound Go methods, `wails dev` exposes a browser-accessible dev server (default http://localhost:34115) where `window.go.main.App.*` is callable — drive it with Playwright instead of simulating native dialogs.
 
 ## Project Structure
 
-- `cmd/md-view/`: CLI entry point
-- `pkg/commands/`: Cobra commands (view, serve, stop, status)
-- `pkg/daemon/`: Daemon management (start, stop, PID/socket files)
-- `pkg/protocol/`: Unix socket JSON protocol between CLI and daemon
-- `pkg/renderer/`: Markdown → HTML rendering (goldmark, chroma, mermaid, go:embed static)
-- `pkg/server/`: HTTP server (routes, SSE live reload)
-- `pkg/watcher/`: File system watcher for live reload
+- `main.go`: Wails entry point — Cobra root + `view` command, `wails.Run`, `SingleInstanceLock`, embeds `frontend/dist`
+- `app.go`: `App` struct (Wails-bound backend) — open/render/theme/recent/drop, `OnDomReady`, `OnSecondInstanceLaunch`
+- `menu.go`, `events.go`, `assets.go`, `recent.go`, `cli.go`: menu, live-reload watcher, image handler, recent-files, CLI arg parsing
+- `frontend/dist/`: embedded frontend (HTML/CSS/JS) — `index.html`, `app.js`, `augment.js`, `base.css`, `dark.css`, `chroma.css`, `ui.css`, mermaid, copy-button
+- `pkg/renderer/`: Markdown → HTML (goldmark + chroma + frontmatter); `RenderBody` returns a chrome-free fragment
+- `pkg/watcher/`: fsnotify wrapper for live reload (emits `file-changed`)
+- `cmd/gen-chroma-css/`: generates `frontend/dist/{chroma,ui}.css` at build time
 - `docs/`: User documentation
-- `ttmp/`: Temporary documentation and debugging logs
+- `ttmp/`: Ticket workspace (MD-WAILS design + diary)
+
+The old `pkg/{daemon,protocol,server,commands}` and `cmd/md-view` were deleted in the MD-WAILS cutover — the daemon/socket/HTTP/browser model is replaced by a single in-process Wails binary.
 
 <runningProcessesGuidelines>
 - When testing TUIs, use tmux and capture-pane to interact with the UI.

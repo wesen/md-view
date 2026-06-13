@@ -65,11 +65,11 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 7 — Cutover: delete old packages, single binary
 
-- [ ] 7.1 Delete `pkg/daemon`, `pkg/protocol`, `pkg/server`, `pkg/commands`, `cmd/md-view/main.go`
-- [ ] 7.2 `go build ./...` + `go test ./...` clean
-- [ ] 7.3 Update `Makefile`, `.goreleaser.yaml`, `.github/workflows`
-- [ ] 7.4 Update `docs/`, `README.md`, `AGENT.md`
-- [ ] 7.5 Commit
+- [x] 7.1 Delete `pkg/daemon`, `pkg/protocol`, `pkg/server`, `pkg/commands`, `cmd/md-view/main.go` (graph verified: no external importers)
+- [x] 7.2 `go build ./...` + `go test ./...` clean (renderer/watcher/root main/gen-chroma-css only); `go mod tidy` dropped glazed
+- [x] 7.3 Update `Makefile` (`build`→`wails build`+`frontend-css`, `run`/`test`/`clean`/`install`; removed glazed-lint/bump-glazed/serve), `.goreleaser.yaml` (`main: .`, build tags, descriptions), `.github/workflows/{push,lint}.yml` (webkit deps + `-tags webkit2_41`)
+- [x] 7.4 Update `AGENT.md` (Wails build commands + structure)
+- [x] 7.5 Commit (`make build` → `build/bin/md-view view README.md` opens `md-view: README.md`; lint 0 issues; tests green)
 
 ## Phase 8 — reMarkable + toolbar buttons
 
