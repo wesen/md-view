@@ -904,3 +904,65 @@ The implementation review (Step 12) named the stale user-facing docs as the sing
 
 - Files audited: `README.md`, `AGENT.md`, `docs/getting-started.md`, `docs/user-guide.md`.
 - Correct-already: `AGENT.md`, `Makefile`, `.goreleaser.yaml`, `wails.json`.
+
+## Step 14: Phase 9 — rewrite README.md and docs/getting-started.md
+
+With the scope locked, the two landing docs were rewritten to describe the shipped single-binary Wails app. The biggest correctness fixes were the install story and the removal of the daemon/browser command surface.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 13 — add tasks, then execute the documentation cutover, keeping a diary and committing.)
+
+**Assistant interpretation:** Execute tasks 9.2 and 9.3: rewrite `README.md` and `docs/getting-started.md` so a new user reading them first forms the right model (native window, no daemon, `make build`, `view [file] [--dark]`), with no live operational references to the deleted model.
+
+**Inferred user intent:** The public entry-point docs must stop teaching the daemon. Anyone who clones the repo or reads the README on GitHub should get install + usage that actually works.
+
+### What I did
+
+- **`README.md`** (full rewrite): replaced the "lightweight daemon" intro with the Wails single-binary framing; new architecture diagram (single process: Cobra CLI → Wails runtime → WebView + `pkg/renderer`/`pkg/watcher`); corrected the command table to `view [file] [--dark]` + bare `md-view`; rewrote the install section to lead with `make build` (and the `libwebkit2gtk-4.1-dev`/`libsoup-3.0-dev` Linux caveat) plus GoReleaser-produced native packages, explicitly stating it is **not** `go install <module>/cmd/md-view` (path deleted, CGO/Wails); added the relative-image, drag-drop, recent-files, reMarkable, and copy/download features; documented the Linux `SingleInstanceLock` multi-window limitation.
+- **`docs/getting-started.md`** (full rewrite): install (build from source, not `go install`); "Your First View" now describes a native window opening (no daemon-start steps, no browser, no URL printout); live reload described as event-driven (`file-changed`), with `--no-reload` removed; dark theme via toggle + `--dark` only (URL param/localStorage removed); new "Open Files Other Ways" (menu, drag-drop, recent-files sidebar + `~/.config/md-view/recent.json`) and "Relative Images" (`/file/` allow-list) sections; Quick Reference trimmed to the three real invocations.
+- Verified both files with a grep pass for stale terms. The only remaining hits are **correct negative statements** ("There is no daemon", "not installable via `go install`", "The old `serve`/`status`/`stop` commands no longer exist") and the legitimate `/file/` allow-list reference — no live operational instructions for the deleted model survive.
+
+### Why
+
+- These two files are the first thing a user reads. If they teach `go install .../cmd/md-view` or `md-view serve`, the install fails and the mental model is wrong before any code runs. Leading with `make build` + the webkit-dev-lib caveat is the honest, working path for a CGO desktop binary today.
+- Removing `--no-reload`/`--browser`/`--no-browser`/`--port`/URL-params was not cosmetic: those flags/params do not exist in the Cobra `view` command (`main.go`) anymore, so documenting them would be a lie.
+
+### What worked
+
+- The grep-as-acceptance-criterion from Step 13 paid off immediately: it turned "is it clean?" into a checkable boolean, and it surfaced that the surviving matches were all intentional negatives rather than bugs.
+- Keeping the hero image and the "30-second quick start" shape preserved continuity for existing readers while fixing every factual claim underneath.
+
+### What didn't work
+
+- Nothing failed. One judgment call: I chose to state theme persistence honestly as "kept in memory for the current session" rather than promise localStorage persistence (the Wails app does not persist theme yet — OQ-2). Documenting the real behavior beats documenting the old daemon's behavior.
+
+### What I learned
+
+- A CGO desktop binary breaks the `go install <module>/cmd/x` muscle memory in two independent ways: the `cmd/md-view` path is gone, **and** even if it existed, `go install` does not provide the CGO toolchain + system WebView libs a Wails binary needs. So the docs must lead with build-from-source and treat native packages as the distribution story.
+- "Negative" doc lines ("md-view is not a daemon", "the old commands no longer exist") are valuable migration hand-holding and should not be purged by an over-eager grep — they are the bridge for readers who remember the old tool.
+
+### What was tricky to build
+
+- **Tone of the migration note.** Saying "not a daemon, no serve/stop/status" has to be helpful, not apologetic. Phrased it as a short callout so return readers immediately learn the model changed, without dwelling on it.
+
+### What warrants a second pair of eyes
+
+- Whether the GoReleaser "native packages (Homebrew / deb / rpm) are produced on release" wording over-promises. A release has not been cut in this session; the wording deliberately says "once one is released" / "on release". Confirm that's the right hedge vs. removing the line entirely until a release exists.
+- The in-memory theme-persistence wording — confirm we want the honest "current session" phrasing rather than implementing persistence first.
+
+### What should be done in the future
+
+- 9.4: rewrite `docs/user-guide.md` (the big surgery — remove HTTP API / Unix Socket / Daemon Management / browser-selection sections).
+- Eventually cut a release so the native-package install path is real, not "on release".
+
+### Code review instructions
+
+- `README.md` (rewritten) and `docs/getting-started.md` (rewritten).
+- Validate: `rg -nE 'daemon|serve|status|stop|--browser|--no-reload|--no-browser|--port|Unix Socket|SSE|127\.0\.0\.1|cmd/md-view|go install' README.md docs/getting-started.md` — every hit must be a negative statement or a migration note, not an instruction.
+- Confirm the command table / Quick Reference match `main.go` (only `view [file] [--dark]` + bare root).
+
+### Technical details
+
+- Commit (this step): see `git log` for the README + getting-started commit.
+- Removed claims: `--browser`, `--no-browser`, `--no-reload`, `--port`, `?theme=dark` URL param, localStorage theme persistence, `go install .../cmd/md-view`, `md-view serve/status/stop`.
