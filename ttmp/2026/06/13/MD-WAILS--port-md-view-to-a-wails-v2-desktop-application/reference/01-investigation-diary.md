@@ -840,3 +840,67 @@ After the implementation was complete, a second deliverable was requested: not a
 
 - Deliverable path: `design-doc/01-implementation-review-and-lessons-learned.md`.
 - Upload bundle (this step): review doc + diary + design guide + index to reMarkable.
+
+## Step 13: Phase 9 — scope the documentation cutover and add tasks
+
+The implementation review (Step 12) named the stale user-facing docs as the single biggest non-code weakness: `README.md`, `docs/getting-started.md`, and `docs/user-guide.md` still describe the **deleted** daemon/browser model. This step scopes that work precisely and turns it into an atomic Phase 9 task list so the remaining doc work is verifiable rather than hand-wavy.
+
+### Prompt Context
+
+**User prompt (verbatim):** "read [investigation diary] and [the ARTICLE in the Obsidian vault] And then add tasks to the ticket to update / clarify / remove all the necessary documentation to fit the new refactor. see also [implementation review doc]. Keep a diary as you work, commit at appropriate intervals"
+
+**Assistant interpretation:** Audit every doc/reference in the repo for stale daemon/browser/socket/CLI content, add a concrete Phase 9 documentation-cutover task list to the ticket, then execute it file-by-file with diary entries and focused commits.
+
+**Inferred user intent:** Close the documentation gap the review identified — the code shipped a single Wails binary, but the user-facing docs still teach the daemon. The public surface must match the shipped system before this rewrite is actually "done".
+
+### What I did
+
+- Re-read the three inputs end-to-end: the investigation diary (Steps 1–12), the Obsidian deep-dive article, and the implementation review doc.
+- **Audited all markdown outside the ticket** (`find . -name '*.md' -not -path './ttmp/*'`): only four files exist — `README.md`, `AGENT.md`, `docs/getting-started.md`, `docs/user-guide.md`.
+- **Grep-audited stale-model terms** (`daemon`, `md-view serve/stop/status`, `Unix Socket`, `SSE`, `--browser`, `--no-reload`, `glazed`, `127.0.0.1`, `cmd/md-view`) across the repo (excluding `ttmp/`, `node_modules/`, `frontend/wailsjs/`). Matches were confined to the three user-facing docs plus historical references in `AGENT.md` (which legitimately explain what the cutover deleted). `AGENT.md`, `Makefile`, `.goreleaser.yaml`, `wails.json` are already correct.
+- **Cross-checked the implementation claims against the live code** so the doc rewrites would be accurate, not just paraphrased from the diary: `main.go` (Cobra `view` + bare root + `runDesktop` + `SingleInstanceLock`), `app.go` (bound methods incl. `UploadToRemarkable`/`RawFile`/`DownloadMarkdown`), `Makefile` (`build: frontend-css; wails build -tags webkit2_41`), `go.mod` (`module github.com/go-go-golems/md-view`), `.goreleaser.yaml` (`main: .`, brew/nfpm descriptions already de-daemonized).
+- **Discovered a tasks.md drift:** Phase 8 is fully implemented in code (`buttons.js` exists, `app.go:249/276/287` has the three bound methods, `app.js` calls `MDSInitButtons`), but tasks.md still showed 8.1–8.3 unchecked. Fixed by checking them off with line anchors.
+- Wrote **Phase 9** (tasks 9.1–9.7) into `tasks.md`: audit → README → getting-started → user-guide (explicit removal list) → AGENT verify → bookkeeping → final grep validation.
+
+### Why
+
+- The review doc already did the diagnosis; this step converts that diagnosis into an execution plan with a precise removal/rewrite scope per file, so the remaining steps can't drift into "make it look modern".
+- Locking the install story matters: the old `go install github.com/go-go-golems/md-view/cmd/md-view@latest` is doubly wrong now (path deleted **and** Wails CGO binaries don't `go install`). The new docs must point at `make build` (with the webkit dev-lib caveat) and GoReleaser-produced native packages.
+
+### What worked
+
+- The audit was tight: only 3 files need real rewrites, 1 needs only verification, and everything else is already correct. The doc cutover is smaller than it first looked.
+- The grep audit produced an acceptance criterion for the end (task 9.7): zero live operational references to the old model outside the ticket.
+
+### What didn't work
+
+- Nothing failed. One correction: I initially assumed Phase 8 was open work; the code showed it was done. Recording tasks.md drift so the file stays a trustworthy record.
+
+### What I learned
+
+- `AGENT.md`'s "daemon"/"socket" mentions are a useful historical hand-off to a new contributor ("here is what we deleted and why"), not stale ops docs. The distinction matters: historical context is fine; operational instructions for a deleted subsystem are not.
+- For a CGO desktop binary, `go install <module>/cmd/<binary>` is the wrong install model in two independent ways (no `cmd/md-view`, and CGO/Wails needs the toolchain + system webkit libs). The docs must lead with build-from-source.
+
+### What was tricky to build
+
+- Scoping the `docs/user-guide.md` rewrite: that file has large now-obsolete sections (HTTP API, Unix Socket Protocol, Daemon Management, Browser Integration, SSE). Deciding to **remove** those wholesale rather than rewrite them in place — there is no HTTP/socket/daemon to document anymore. Keeping the surgery explicit in task 9.4 so a reviewer can see exactly what is deleted vs. rewritten vs. kept.
+
+### What warrants a second pair of eyes
+
+- The decision to drop the "theme persistence via localStorage" claim entirely (the new app keeps theme in-memory only — OQ-2 still open). Confirm we'd rather document the honest in-memory behavior than promise localStorage persistence that isn't implemented.
+- Whether to document the GoReleaser-produced deb/rpm/brew packages as "available" — they are configured but a release hasn't been cut in this session, so the docs will say "once released" / build-from-source as the primary path.
+
+### What should be done in the future
+
+- Execute 9.2–9.7 in order; commit after each file.
+- After 9.7, consider a follow-up to cut an actual release so the native-package install path becomes real.
+
+### Code review instructions
+
+- `tasks.md`: Phase 8 now checked; Phase 9 added (9.1–9.7).
+- Validate: `rg -n 'daemon|md-view serve|md-view stop|md-view status|--browser|--no-reload|Unix Socket|SSE|/render|/events|cmd/md-view' --glob '!ttmp/**' README.md AGENT.md docs/` still shows the (pre-9.2–9.4) stale hits in the three docs.
+
+### Technical details
+
+- Files audited: `README.md`, `AGENT.md`, `docs/getting-started.md`, `docs/user-guide.md`.
+- Correct-already: `AGENT.md`, `Makefile`, `.goreleaser.yaml`, `wails.json`.

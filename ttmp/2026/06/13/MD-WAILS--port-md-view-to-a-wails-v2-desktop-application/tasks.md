@@ -73,6 +73,18 @@ Detailed, atomic task list for the MD-WAILS drop-in replacement. Check items off
 
 ## Phase 8 — reMarkable + toolbar buttons
 
-- [ ] 8.1 Bound `UploadToRemarkable`, `RawFile`, `DownloadMarkdown`
-- [ ] 8.2 Adapt `remarkable-button.js`, `toolbar-buttons.js` to bound methods
-- [ ] 8.3 Verify + commit
+- [x] 8.1 Bound `UploadToRemarkable`, `RawFile`, `DownloadMarkdown` (app.go:249/276/287)
+- [x] 8.2 `frontend/dist/buttons.js` (`MDSInitButtons`) calls bound methods instead of `fetch`; loaded in `index.html`, called from `app.js:showContent`
+- [x] 8.3 Verify + commit (reMarkable upload landed on device at `/ai/2026/06/13`)
+
+## Phase 9 — Documentation cutover (match the Wails single-binary model)
+
+The implementation review (design-doc/01-implementation-review-and-lessons-learned.md) flagged the user-facing docs as the biggest non-code weakness: `README.md`, `docs/getting-started.md`, and `docs/user-guide.md` still describe the **deleted** daemon/browser model after the Phase 7 cutover. This phase rewrites them to match the actual shipped system. AGENT.md / Makefile / `.goreleaser.yaml` / `wails.json` are already correct and only need a verification pass.
+
+- [x] 9.1 Audit stale references: confirm the only stale docs are `README.md`, `docs/getting-started.md`, `docs/user-guide.md`; confirm `AGENT.md` references are historical-only (not stale). (Done — see diary Step 13.)
+- [ ] 9.2 Rewrite **`README.md`**: drop "lightweight daemon"/browser/`serve`/`status`/`stop`; replace install (build-from-source via `make build` + GoReleaser-produced native packages — NOT `go install .../cmd/md-view`, that path is deleted and CGO/Wails won't `go install`); new architecture diagram (single Wails process: Cobra + Wails runtime + WebView + `pkg/renderer`/`pkg/watcher`); correct command table (`md-view view [file] [--dark]`, bare `md-view`); features (native window, live reload via events, `/file/` image serving, Mermaid, dual-theme, frontmatter, copy/reMarkable/download, drag-drop, recent files); note Linux `libwebkit2gtk-4.1-dev` + `libsoup-3.0-dev` requirement and the known Linux multi-window limitation.
+- [ ] 9.3 Rewrite **`docs/getting-started.md`**: install (build from source + native packages), first view (native window, not browser tab), live reload (event-driven — drop `--no-reload`), dark theme (toggle + `--dark` — drop URL param/localStorage), Mermaid, multiple files (each `view` opens a window — note multi-window behavior), i3/Sway (native window titles `md-view: <filename>`). Remove `serve`/`status`/`stop`/browser-selection/URL-param sections.
+- [ ] 9.4 Rewrite **`docs/user-guide.md`** (major surgery): REMOVE `serve`/`status`/`stop` command sections, HTTP API (render/raw/static/SSE), Unix Socket Protocol, Daemon Management (state files, stale PID), Browser Integration (browser selection), and `--browser`/`--no-browser`/`--no-reload`/`--port` flags. KEEP + update Markdown Features, Syntax Highlighting ("server-side" → "in-process"), Mermaid Diagrams, YAML Frontmatter, Page Titles (native window title). REWRITE the `view` command (only `--dark`), Dark Theme (in-memory, no URL param/localStorage persistence yet), Live Reload (Wails events, no SSE), i3/Sway (native window), Security (`/file/` allow-list, no socket/HTTP), Troubleshooting (web-kit dev libs, "will not build without the correct build tags" error, multi-window note — remove daemon/port/browser-conflict items).
+- [ ] 9.5 Verify **`AGENT.md`** has no stale operational references (its "daemon" mentions are historical context explaining the cutover — keep). No rewrite expected.
+- [ ] 9.6 Update ticket bookkeeping: diary steps, `index.md` summary, `changelog.md` entry, file relations. Commit docs at each milestone.
+- [ ] 9.7 Final validation: `grep -rn` the repo (excluding `ttmp/`) for `daemon`, `md-view serve`, `md-view stop`, `md-view status`, `--browser`, `--no-reload`, `Unix Socket`, `SSE`, `/render`, `/events`, `cmd/md-view` and confirm zero live operational references remain.
