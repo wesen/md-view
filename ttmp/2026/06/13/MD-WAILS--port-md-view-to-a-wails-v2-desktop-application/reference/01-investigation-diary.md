@@ -966,3 +966,67 @@ With the scope locked, the two landing docs were rewritten to describe the shipp
 
 - Commit (this step): see `git log` for the README + getting-started commit.
 - Removed claims: `--browser`, `--no-browser`, `--no-reload`, `--port`, `?theme=dark` URL param, localStorage theme persistence, `go install .../cmd/md-view`, `md-view serve/status/stop`.
+
+## Step 15: Phase 9 — rewrite docs/user-guide.md (remove the obsolete subsystem docs)
+
+The user-guide was the largest surgery: it contained whole sections documenting subsystems that no longer exist (HTTP API, Unix Socket Protocol, Daemon Management, browser selection, SSE). Those sections were removed outright; the rest was rewritten to the Wails model.
+
+### Prompt Context
+
+**User prompt (verbatim):** (same as Step 13 — execute the documentation cutover, keeping a diary and committing.)
+
+**Assistant interpretation:** Execute task 9.4: remove the obsolete subsystem-doc sections from `docs/user-guide.md` and rewrite the rest, then run task 9.7 (the grep acceptance check) across all rewritten docs.
+
+**Inferred user intent:** The user-guide is the reference doc; it must not document endpoints, sockets, or commands that don't exist. A reader looking up "how does live reload work" must get the event-driven answer, not the deleted SSE answer.
+
+### What I did
+
+- **Removed sections entirely** (they describe deleted code): `serve` / `status` / `stop` command sections; the entire **HTTP API** section (Render/Raw/Static/SSE endpoints); the **Unix Socket Protocol** section; **Daemon Management** (state files, stale PID); **Browser Integration** (browser selection, `--browser`, `--no-browser`); and the flags `--browser`/`--no-browser`/`--no-reload`/`--port`.
+- **Kept + updated** (still accurate): Markdown Features (goldmark GFM table); Syntax Highlighting (reworded "server-side" → "in-process"); Mermaid Diagrams (kept; reworded the init mechanism to "the augmentation pass"); YAML Frontmatter; Page Titles → renamed to **Window Titles** (`runtime.WindowSetTitle`, native window).
+- **Rewrote** for the new model: the `view` command (only `--dark` flag); Overview (single Wails process diagram); Dark Theme (in-memory, no URL param/localStorage); Live Reload (fsnotify → `file-changed` event, no SSE); a new **Opening Files** section (menu/drag-drop/recent); **Relative Images** (`/file/` allow-list); **reMarkable Upload, Copy, and Download** (toolbar bound methods); **Recent Files** (config JSON per OS); i3/Sway (native window) + a **Multiple windows** subsection documenting the `SingleInstanceLock` Linux limitation; **Security** (no listener, `/file/` allow-list, no socket); **Troubleshooting** (web-kit dev libs, the "will not build without the correct build tags" error, multi-window note, CGO) — removed all daemon/port/browser-conflict items; **Dependencies** table (Wails, cobra, goldmark, chroma, fsnotify, logcopter — dropped glazed).
+- **Ran the task-9.7 acceptance grep** across `README.md`, `AGENT.md`, `docs/`: zero matches for `md-view serve|stop|status`, `--browser`, `--no-reload`, `--no-browser`, `Unix Socket`, `SSE`, `/render?`, `/events?`, `127.0.0.1`. Every surviving `daemon`/`go install`/`cmd/md-view` hit is a deliberate negative or migration note.
+
+### Why
+
+- Documenting a deleted HTTP API or socket protocol is worse than omitting it — it actively misleads. Wholesale removal of those sections is the honest move; there is nothing to "update" there because the subsystems are gone.
+- The troubleshooting rewrite matters most operationally: the two highest-value new entries are the `wails build` vs `go build` build-tags error (the real Phase-6 finding) and the webkit dev-lib install. Those are what a new user will actually hit.
+
+### What worked
+
+- The user-guide ended up **shorter and more accurate** than before despite adding several new sections (Opening Files, Relative Images, reMarkable/Copy/Download, Recent Files, Multiple windows) — because the removed HTTP/socket/daemon/browser material was large and is now gone.
+- Task 9.7's grep passed cleanly on the first run, which is the evidence the cutover is complete at the doc level.
+
+### What didn't work
+
+- Nothing failed. One small wording discipline: kept a short "What about serve/status/stop?" callout so return readers with muscle memory aren't stranded — it's a redirect ("drop those calls"), not a doc of the commands.
+
+### What I learned
+
+- "Server-side highlighting" was a transport-era phrase (the highlight happened in the HTTP server before sending HTML to the browser). In the Wails model it happens "in-process" — same Go code, different framing. The reword matters because "server-side" implies a server that no longer exists.
+- The `/file/` allow-list is now the entire security story; with no socket and no HTTP listener, there's no "socket permissions 0600" or "binds to 127.0.0.1" to document. The doc got simpler because the attack surface did.
+
+### What was tricky to build
+
+- **Deciding the removal-vs-rewrite line per section.** Rule applied: if the section documents a deleted subsystem (HTTP/socket/daemon/browser-selection) → remove; if it documents a surviving feature whose framing changed (highlighting, theme, reload, security) → rewrite. That rule kept the surgery principled instead of ad hoc.
+
+### What warrants a second pair of eyes
+
+- The "Theme persistence is a planned follow-up" wording — confirms we're documenting the gap honestly rather than hiding it. Same posture as OQ-2 in the design doc.
+- Whether the Troubleshooting `dnf` package names (`webkit2gtk4.1-devel`, `libsoup3-devel`) are correct for current Fedora — inferred from the Debian names; unverified on Fedora.
+
+### What should be done in the future
+
+- Verify the Fedora/Arch webkit package names against an actual install if targeting those distros.
+- 9.5/9.6: verify AGENT.md (already correct — historical refs only) and update ticket bookkeeping.
+
+### Code review instructions
+
+- `docs/user-guide.md` (rewritten).
+- Validate: `grep -rnE 'md-view serve|md-view stop|md-view status|--browser|--no-reload|--no-browser|Unix Socket|\bSSE\b|/render\?|/events\?|127\.0\.0\.1' README.md AGENT.md docs/` → only the intentional `go install`/`cmd/md-view` negatives in README/getting-started/AGENT.
+- Confirm the `view` flag table matches `main.go` (only `--dark`).
+
+### Technical details
+
+- Commit (this step): see `git log` for the user-guide rewrite.
+- Sections removed: HTTP API (render/raw/static/SSE), Unix Socket Protocol, Daemon Management (state files / stale PID), Browser Integration (browser selection), `serve`/`status`/`stop`.
+- Sections added/rewritten: Opening Files, Relative Images, reMarkable/Copy/Download, Recent Files (per-OS paths), Multiple windows, Security (allow-list only), Troubleshooting (webkit + build-tags + CGO).

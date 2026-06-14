@@ -9,49 +9,42 @@ Everything you need to know about md-view — commands, flags, rendering, integr
 - [Overview](#overview)
 - [Commands](#commands)
   - [view](#view)
-  - [serve](#serve)
-  - [status](#status)
-  - [stop](#stop)
 - [Rendering](#rendering)
   - [Markdown Features](#markdown-features)
   - [Syntax Highlighting](#syntax-highlighting)
   - [Mermaid Diagrams](#mermaid-diagrams)
   - [YAML Frontmatter](#yaml-frontmatter)
-  - [Page Titles](#page-titles)
+  - [Window Titles](#window-titles)
 - [Dark Theme](#dark-theme)
 - [Live Reload](#live-reload)
-- [Daemon Management](#daemon-management)
-  - [How the Daemon Starts](#how-the-daemon-starts)
-  - [State Files](#state-files)
-  - [Stale PID Files](#stale-pid-files)
-- [Browser Integration](#browser-integration)
-  - [Browser Selection](#browser-selection)
-  - [New Window Behavior](#new-window-behavior)
+- [Opening Files](#opening-files)
+- [Relative Images](#relative-images)
+- [reMarkable Upload, Copy, and Download](#remarkable-upload-copy-and-download)
+- [Recent Files](#recent-files)
+- [Window Manager Integration](#window-manager-integration)
   - [i3 / Sway Integration](#i3--sway-integration)
-- [HTTP API](#http-api)
-  - [Render Endpoint](#render-endpoint)
-  - [Raw Endpoint](#raw-endpoint)
-  - [Static Assets](#static-assets)
-  - [SSE Events Endpoint](#sse-events-endpoint)
-- [Unix Socket Protocol](#unix-socket-protocol)
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
+- [Dependencies](#dependencies)
 
 ---
 
 ## Overview
 
-md-view is a background daemon + CLI combo. The daemon serves rendered Markdown over HTTP on `localhost`. The CLI sends commands to the daemon over a Unix domain socket. You typically only interact with the CLI — the daemon starts and stops automatically.
+md-view is a **single native desktop application** built with [Wails v2](https://wails.io/). It opens a platform-native window (WebKitGTK on Linux, WKWebView on macOS, WebView2 on Windows) and renders Markdown in-process in Go. There is no daemon, no background HTTP server, and no browser tab — just one binary that owns the whole lifecycle.
+
+The command line is simply the way you launch the app and tell it which file to open.
 
 ```
-┌──────────────┐   Unix Socket    ┌──────────────────┐    HTTP     ┌─────────┐
-│  md-view CLI │ ─── JSON cmd ──► │  md-view server  │ ─────────► │ Browser │
-│  (ephemeral) │                  │  (daemon)        │            │         │
-└──────────────┘                  │                  │            └─────────┘
-                                  │  - Renders .md   │
-                                  │  - Serves HTML   │
-                                  │  - Watches files │
-                                  └──────────────────┘
+┌─────────────────────────────────────────────────────────────┐
+│  Single native process: md-view                             │
+│                                                             │
+│   Cobra CLI ──▶ Wails runtime (bound App) ──▶ WebView       │
+│                        │                          ▲         │
+│                        ▼                          │ events  │
+│              pkg/renderer (RenderBody) ────────────┘         │
+│              pkg/watcher (fsnotify)                          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -61,137 +54,51 @@ md-view is a background daemon + CLI combo. The daemon serves rendered Markdown 
 ### view
 
 ```bash
-md-view view <FILE> [flags]
+md-view view [FILE] [flags]
 ```
 
-The primary command. Opens a Markdown file in your browser as rendered HTML.
+The primary command. Opens a Markdown file rendered as HTML in a native window.
 
 **What it does:**
 
-1. Resolves the file path to an absolute path
-2. Checks if the daemon is running
-3. If not, starts the daemon in the background and waits for it to be ready
-4. Sends a `view` command over the Unix socket
-5. The daemon opens a new browser window on the rendered page
-6. The CLI exits — you're done
+1. Parses the file path
+2. Launches the Wails desktop window
+3. Once the window's DOM is ready, renders the file and swaps the content in
+4. The process stays alive until you close the window
 
 **Arguments:**
 
 | Argument | Required | Description |
 |----------|----------|-------------|
-| `FILE` | Yes | Path to the Markdown file to view (relative or absolute) |
+| `FILE` | No | Path to the Markdown file to view (relative or absolute). Omit to open an empty window. |
 
 **Flags:**
 
 | Flag | Type | Default | Description |
 |------|------|---------|-------------|
-| `--browser` | string | `firefox --new-window` | Browser command to open the URL |
-| `--no-browser` | bool | false | Don't open the browser, just start the daemon and print the URL |
-| `--no-reload` | bool | false | Disable live reload for this view |
-| `--dark` | bool | false | Use dark theme |
-| `--port` | int | 0 | HTTP port for the daemon (0 = random available) |
+| `--dark` | bool | false | Open the file in dark mode |
 
 **Examples:**
 
 ```bash
-# View a file (simplest usage — opens Firefox in a new window)
+# View a file (simplest usage — opens a native window)
 md-view view ./README.md
 
-# View without live reload
-md-view view --no-reload ./notes.md
-
-# Don't open a browser, just print the URL
-md-view view --no-browser ./doc.md
-
-# Use a different browser
-md-view view --browser "google-chrome" ./doc.md
-
-# Use xdg-open (system default)
-md-view view --browser "xdg-open" ./doc.md
-
 # Dark theme
-md-view view --dark ./doc.md
-
-# Use a specific port (useful for firewalls)
-md-view view --port 8080 ./doc.md
+md-view view --dark ./notes.md
 ```
 
-**Output:**
-
-The CLI prints the rendered URL to stdout:
-
-```
-http://localhost:42213/render?file=/home/you/README.md
-```
-
-With `--no-browser`, only the URL is printed and no browser is opened.
-
----
-
-### serve
+### Bare launch
 
 ```bash
-md-view serve [flags]
+md-view            # no subcommand
 ```
 
-Start the HTTP server in the foreground. Normally called internally by the daemon, but useful for debugging.
+Opens an empty window. This is also what happens when you double-click the `md-view` binary.
 
-**Flags:**
+### What about `serve` / `status` / `stop`?
 
-| Flag | Type | Default | Description |
-|------|------|---------|-------------|
-| `--port` | int | 0 | HTTP port (0 = random available) |
-
-**Examples:**
-
-```bash
-# Start on a random port
-md-view serve
-
-# Start on a fixed port
-md-view serve --port 8080
-```
-
-Press `Ctrl+C` to stop the server gracefully.
-
----
-
-### status
-
-```bash
-md-view status
-```
-
-Show whether the daemon is running, its PID, HTTP port, and uptime.
-
-**Output (running):**
-
-```
-md-view daemon: running (PID 23461, port 42213)
-  uptime: 3s
-```
-
-**Output (not running):**
-
-```
-md-view daemon: not running
-```
-
----
-
-### stop
-
-```bash
-md-view stop
-```
-
-Stop the daemon by sending SIGTERM. If the process doesn't exit within 5 seconds, it's force-killed. All state files (PID, socket, port) are cleaned up.
-
-**Output:**
-
-```
-Daemon stopped.
-```
+Those commands no longer exist. md-view used to be a background daemon plus a browser; it is now a single desktop binary, so there is no daemon process to query or stop. If you have scripts or muscle memory referencing them, replace `md-view view <file>` usage as-is (it still works) and drop any `serve`/`status`/`stop` calls.
 
 ---
 
@@ -212,9 +119,9 @@ md-view uses [goldmark](https://github.com/yuin/goldmark) with the GFM (GitHub-F
 
 ### Syntax Highlighting
 
-Code blocks are syntax-highlighted server-side using [Chroma](https://github.com/alecthomas/chroma) with the `github` style. Over 200 languages are supported — just add the language name after the backticks:
+Code blocks are syntax-highlighted **in-process** using [Chroma](https://github.com/alecthomas/chroma) with the `github` style. Over 200 languages are supported — just add the language name after the backticks:
 
-```
+````markdown
 ```python
 def hello():
     print("Hello, md-view!")
@@ -223,14 +130,11 @@ def hello():
 ```go
 func main() {
     fmt.Println("Hello, md-view!")
+}
 ```
+````
 
-```javascript
-console.log("Hello, md-view!");
-```
-```
-
-No JavaScript is required — highlighting is done entirely on the server.
+No JavaScript is required — highlighting is produced by Go at render time and emitted as CSS classes.
 
 ### Mermaid Diagrams
 
@@ -239,18 +143,18 @@ md-view renders [Mermaid](https://mermaid.js.org/) diagrams automatically. Write
 ````markdown
 ```mermaid
 graph TD
-    A[CLI] -->|Unix Socket| B[Daemon]
-    B -->|HTTP| C[Browser]
+    A[CLI] --> B[md-view window]
+    B --> C[Renderer]
 ```
 ````
 
-The diagram renders as an SVG directly in the page. Mermaid.js is **embedded in the md-view binary** — no network access is required.
+The diagram renders as an SVG directly in the window. Mermaid.js is **embedded in the md-view binary** — no network access is required.
 
 **Supported diagram types:** flowchart, sequence, class, state, ER, Gantt, pie, mindmap, and more. See the [Mermaid documentation](https://mermaid.js.org/intro/) for syntax.
 
 **Theme switching:** When you toggle the dark theme, Mermaid diagrams are automatically re-rendered with the corresponding theme (`default` for light, `dark` for dark mode).
 
-**How it works:** goldmark renders ` ```mermaid ` blocks as `<code class="language-mermaid">`. A small initialization script converts these into `<div class="mermaid">` elements that mermaid.js processes into SVG.
+**How it works:** goldmark renders ` ```mermaid ` blocks as fenced code. The frontend's augmentation pass converts these into rendered SVGs every time content is swapped into the window.
 
 ### YAML Frontmatter
 
@@ -258,7 +162,7 @@ If your Markdown file starts with YAML frontmatter (delimited by `---`), md-view
 
 1. **Strips it** from the rendered body
 2. **Displays it** as a collapsible key-value table at the top of the page
-3. **Uses the `Title` field** as the browser tab title (if present)
+3. **Uses the `Title` field** as the window title (if present)
 
 Example frontmatter:
 
@@ -274,17 +178,17 @@ Topics:
 
 The frontmatter appears as a collapsed `▶ Frontmatter` section. Click it to expand. Each key is on the left; each value is on the right. Nested values (lists, maps) are displayed as formatted text.
 
-### Page Titles
+### Window Titles
 
-The browser tab title is determined in this order:
+The native window title is determined in this order:
 
 1. **Frontmatter `Title`** — if the file has a `Title:` field in its frontmatter
-2. **Filename** — the basename of the file (e.g., `README.md`)
+2. **Filename** — the basename of the file (e.g. `README.md`)
 
-All titles are prefixed with `md-view: ` for window manager matching. Examples:
+All titles are prefixed with `md-view: ` for window-manager matching. Examples:
 
-| File | Frontmatter Title | Browser Tab Title |
-|------|------------------|-------------------|
+| File | Frontmatter Title | Window Title |
+|------|------------------|---------------|
 | `README.md` | (none) | `md-view: README.md` |
 | `01-diary.md` | `Diary` | `md-view: Diary` |
 | `api.md` | `API Reference` | `md-view: API Reference` |
@@ -293,13 +197,12 @@ All titles are prefixed with `md-view: ` for window manager matching. Examples:
 
 ## Dark Theme
 
-md-view includes a full dark theme modeled after GitHub's dark mode. Three ways to activate it:
+md-view includes a full dark theme modeled after GitHub's dark mode. Two ways to activate it:
 
 | Method | How |
 |--------|-----|
-| **Toggle button** | Click **🌙 Dark** in the top-right corner of any rendered page |
+| **Toggle button** | Click the theme button in the top-right corner of the window |
 | **CLI flag** | `md-view view --dark file.md` |
-| **URL parameter** | Add `?theme=dark` to the render URL |
 
 ### What changes in dark mode
 
@@ -311,107 +214,88 @@ md-view includes a full dark theme modeled after GitHub's dark mode. Three ways 
 
 ### Code highlighting in dark mode
 
-Both light and dark Chroma CSS are always included in the page. Dark rules are prefixed with `[data-theme="dark"]` selectors, so the toggle switches highlighting instantly without a page reload.
+Both light and dark Chroma CSS are always included. Dark rules are prefixed with `[data-theme="dark"]` selectors, so the toggle switches highlighting instantly without reloading content.
 
 ### Theme persistence
 
-Your theme preference is saved in `localStorage`. After you toggle dark mode once, all future pages opened in md-view will use the dark theme until you toggle back. This works even across different files and daemon restarts.
+The theme is kept in memory for the current app session. Toggling updates all open content immediately. (Persisting the preference across launches is a planned follow-up.)
 
 ---
 
 ## Live Reload
 
-When you view a file, md-view watches it for changes using [fsnotify](https://github.com/fsnotify/fsnotify). When the file is saved, the browser page reloads automatically within about a second.
+When you view a file, md-view watches it for changes using [fsnotify](https://github.com/fsnotify/fsnotify). When the file is saved, the view refreshes automatically within about a second.
 
-**How it works:**
+**How it works (no network involved):**
 
-1. The rendered page includes a small JavaScript snippet that opens a Server-Sent Events (SSE) connection to `/events?file=<path>`
-2. The server watches the file via fsnotify
-3. On a `Write` event, the server pushes a `reload` event to all connected SSE clients
-4. The client JavaScript calls `location.reload()`
-
-**Disable live reload:**
-
-```bash
-md-view view --no-reload ./final-draft.md
-```
+1. `pkg/watcher` registers an fsnotify watch on the open file
+2. On a write event, the watcher signals a goroutine
+3. The app emits a `file-changed` Wails event to the window
+4. The frontend re-renders the current file and swaps the content in (re-running Mermaid and copy-button augmentation)
 
 **Limitations:**
 
-- If the file is deleted and recreated (e.g., `git checkout`), the watch may be lost. Stop and restart the daemon to re-establish it.
+- Live reload watches the **currently open file's path**. Opening file B stops updates for file A until A is reopened.
+- If the file is deleted and recreated (e.g. `git checkout`), the watch may be lost. Reopen the file.
 - The watcher monitors the file itself, not the directory. Some editors that write to a temp file and rename may not trigger a reload.
 
 ---
 
-## Daemon Management
+## Opening Files
 
-### How the Daemon Starts
+Besides the command line, you can open a file by:
 
-When you run `md-view view file.md`:
+- **Menu:** File → Open… (`Ctrl/Cmd-O`) opens a native file dialog.
+- **Drag-and-drop:** drop a `.md` file anywhere on the window.
+- **Recent files:** the sidebar lists recently opened files; click one to reopen it.
 
-1. The CLI checks for a PID file at `~/.local/state/md-view/md-view.pid`
-2. If the PID file exists and the process is alive, the daemon is already running
-3. If not, the CLI starts a new daemon: `exec.Command(os.Args[0], "serve", ...)`
-4. The daemon starts in the background (detached from the terminal via `Setpgid`)
-5. The CLI waits for the socket file to appear (up to 5 seconds)
-6. The CLI sends the `view` command and exits
-
-### State Files
-
-All runtime state lives in `~/.local/state/md-view/` (respects `$XDG_STATE_HOME`):
-
-| File | Purpose |
-|------|---------|
-| `md-view.pid` | Daemon process ID |
-| `md-view.port` | HTTP port the daemon is listening on |
-| `md-view.sock` | Unix domain socket for CLI↔daemon IPC |
-
-You can safely delete these files when the daemon is not running.
-
-### Stale PID Files
-
-If the daemon crashes without cleaning up (e.g., `kill -9`), the PID file may be stale. md-view handles this automatically:
-
-- When `view` or `status` detects a stale PID (process not alive), it removes the state files and starts a fresh daemon
-- You can also manually clean up: `rm ~/.local/state/md-view/md-view.*`
+All of these route through the same render path, so the window title, live reload, and augmentation behave identically regardless of how the file was opened.
 
 ---
 
-## Browser Integration
+## Relative Images
 
-### Browser Selection
+Images referenced with a relative path resolve against the open file's directory:
 
-The default browser command is `firefox --new-window`. You can override it:
-
-- `--browser` flag — specify any browser command (e.g. `"google-chrome"`, `"xdg-open"`)
-- `--no-browser` — don't open a browser at all; just print the URL
-- The `--browser` value is passed to the daemon, which splits it into executable + arguments and runs it
-
-**Examples:**
-
-```bash
-# Default: firefox --new-window
-md-view view ./README.md
-
-# System default browser
-md-view view --browser "xdg-open" ./README.md
-
-# Google Chrome
-md-view view --browser "google-chrome" ./README.md
-
-# No browser (URL only)
-md-view view --no-browser ./README.md
+```markdown
+![diagram](images/diagram.png)
 ```
 
-### New Window Behavior
+md-view rewrites relative `<img src>` to `/file/<absolute-path>` URLs and serves them through an allow-listed handler. Only the directory of an opened file (and what it links) is readable this way; everything else returns `403`. See [Security](#security).
 
-md-view always opens a **new browser window** (not a tab). This is important for window manager integration — a new window can be floated, moved, or assigned to a workspace independently.
+---
 
-For Firefox, this uses `--new-window`. For Chrome/Chromium, this uses `--new-window`.
+## reMarkable Upload, Copy, and Download
+
+The rendered window has a small toolbar of actions for the current file:
+
+- **Upload to reMarkable** — sends the current file to your reMarkable device/cloud via the `remarquee` CLI.
+- **Copy path** — copies the absolute path of the open file to the clipboard.
+- **Download** — opens a native save dialog and writes the markdown source to the location you choose.
+
+Code blocks also get a **copy-to-clipboard** button (revealed on hover).
+
+---
+
+## Recent Files
+
+md-view remembers recently opened files in a JSON file:
+
+- **Linux:** `~/.config/md-view/recent.json`
+- **macOS:** `~/Library/Application Support/md-view/recent.json`
+- **Windows:** `%AppData%/md-view/recent.json`
+
+(These are the platform equivalents of `os.UserConfigDir()/md-view/recent.json`.)
+
+The list is loaded on startup, prepended-to and deduplicated on each open, capped at 10 entries, and saved on shutdown.
+
+---
+
+## Window Manager Integration
 
 ### i3 / Sway Integration
 
-All md-view browser windows have titles starting with `md-view:`. Add this to your i3 config (`~/.config/i3/config`):
+All md-view windows have titles starting with `md-view:`. Add this to your i3 config (`~/.config/i3/config`):
 
 ```
 for_window [title="^md-view:.*"] floating enable
@@ -433,7 +317,7 @@ i3-msg reload
 swaymsg reload
 ```
 
-After reloading, every `md-view view` will open as a floating window. This works because md-view opens Firefox with `--new-window`, creating a separate i3 window that can be managed independently.
+After reloading, every `md-view view` opens as a floating window. This works because md-view is a real native window whose title you can match.
 
 **Advanced: resize and center**
 
@@ -454,194 +338,67 @@ for_window [title="^md-view:.*"] move scratchpad
 bindsym $mod+m scratchpad show
 ```
 
----
+### Multiple windows
 
-## HTTP API
-
-The daemon serves HTTP on `http://127.0.0.1:<PORT>/`. All endpoints are localhost-only.
-
-### Render Endpoint
-
-```
-GET /render?file=<absolute_path>[&theme=dark]
-```
-
-Render a Markdown file as styled HTML. Returns `text/html`. Add `&theme=dark` to use the dark theme.
-
-**Example:**
-
-```bash
-curl "http://localhost:42213/render?file=/home/you/README.md"
-```
-
-**Error responses:**
-
-- `400` — Missing `file` parameter, invalid path, or not a regular file
-- `404` — File not found
-- `500` — Render error (malformed Markdown, etc.)
-
-Error pages are styled HTML with a large status code, heading, and contextual message.
-
-### Raw Endpoint
-
-```
-GET /raw?file=<absolute_path>
-```
-
-Serve the raw Markdown source. Returns `text/plain`.
-
-**Example:**
-
-```bash
-curl "http://localhost:42213/raw?file=/home/you/README.md"
-```
-
-### Static Assets
-
-```
-GET /static/base.css          — GitHub-flavored Markdown CSS
-GET /static/reload.js          — SSE client for live reload
-GET /static/mermaid.min.js     — Embedded Mermaid.js library (3.1MB)
-GET /favicon.ico               — Returns 204 No Content
-```
-
-### SSE Events Endpoint
-
-```
-GET /events?file=<absolute_path>
-```
-
-Server-Sent Events endpoint for live reload. The server pushes `event: reload` when the file changes.
-
-**Event format:**
-
-```
-event: reload
-data: reload
-```
-
-**Browser client (built into md-view):**
-
-```javascript
-var es = new EventSource("/events?file=/path/to/file.md");
-es.addEventListener("reload", function() { location.reload(); });
-```
-
----
-
-## Unix Socket Protocol
-
-The daemon listens on a Unix domain socket at `~/.local/state/md-view/md-view.sock`. Messages are newline-delimited JSON (NDJSON).
-
-**Client → Server:**
-
-| Command | JSON | Description |
-|---------|------|-------------|
-| `view` | `{"command": "view", "path": "/abs/path/to/file.md", "browser": "firefox --new-window"}` | Open a file in the browser |
-| `ping` | `{"command": "ping"}` | Check if the daemon is alive |
-| `stop` | `{"command": "stop"}` | Shut down the daemon |
-
-**Server → Client:**
-
-| Status | JSON | Description |
-|--------|------|-------------|
-| `ok` | `{"status": "ok", "url": "http://localhost:PORT/render?file=..."}` | Success response to `view` |
-| `pong` | `{"status": "pong"}` | Response to `ping` |
-| `error` | `{"status": "error", "message": "..."}` | Error response |
-
-**Manual socket interaction (debugging):**
-
-```bash
-echo '{"command":"ping"}' | socat - UNIX-CONNECT:$HOME/.local/state/md-view/md-view.sock
-```
+md-view wires Wails' `SingleInstanceLock` so a second `md-view view` would normally reuse the running window. On some Linux D-Bus setups the second invocation opens a **new window** instead of forwarding to the first. This is accepted behavior for now: every `md-view view <file>` reliably opens the file in a native window; deduplication to a single window is best-effort and may depend on your platform/D-Bus configuration.
 
 ---
 
 ## Security
 
-md-view is designed as a single-user local tool. Security measures:
+md-view is a single-user local desktop tool. Security posture:
 
-- **Localhost only** — HTTP server binds to `127.0.0.1`. No external access.
-- **Socket permissions** — Unix socket is `0600` (owner only).
-- **Path validation** — Only regular files can be rendered. No directory traversal, no symlinks to `/proc`.
-- **No authentication** — This is intentional. If you can access localhost, you can view files. Don't expose the port.
+- **No network listener.** There is no HTTP server and no socket. The window is an embedded WebView served from in-process embedded assets.
+- **Relative images via allow-list.** The `/file/<abs-path>` handler only serves paths inside the directory of an opened file. The prefix check includes a path separator, so `/tmp/foo` does not authorize `/tmp/foobar`. Anything outside an allowed directory returns `403`.
+- **Local file access only.** Rendering and the reMarkable/download actions read the files you explicitly open. No remote fetching.
 
 ---
 
 ## Troubleshooting
 
-### "daemon did not start"
+### `wails build` vs `go build` — "will not build without the correct build tags"
 
-The CLI waited 5 seconds for the socket to appear but it didn't. Check:
+A Wails production binary must be built with `wails build` (or `make build`, which wraps it). A plain `go build` omits Wails' build tags and the resulting binary refuses to start with:
 
-```bash
-# Is the process running?
-ps aux | grep md-view
-
-# Is there a stale PID file?
-cat ~/.local/state/md-view/md-view.pid
-# If the PID doesn't match a running process, remove it:
-rm ~/.local/state/md-view/md-view.*
-
-# Try starting in foreground to see errors:
-md-view serve --port 18765
+```
+Error: Wails applications will not build without the correct build tags.
 ```
 
-### "bind: address already in use"
+Fix: always use `make build` (which runs `wails build -tags webkit2_41`).
 
-A previous daemon didn't shut down cleanly. Stop it and restart:
+### Missing webkit development libraries (Linux)
 
-```bash
-md-view stop
-md-view view ./README.md
-```
-
-### Browser doesn't open
-
-Check that `$BROWSER` is set or that one of the supported browsers is installed:
+The Linux build links WebKitGTK and libsoup. Install the dev packages:
 
 ```bash
-which firefox xdg-open google-chrome chromium
+# Debian / Ubuntu
+sudo apt install libwebkit2gtk-4.1-dev libsoup-3.0-dev
+
+# Fedora
+sudo dnf install webkit2gtk4.1-devel libsoup3-devel
 ```
 
-Try explicitly:
+Then `make build` again.
+
+### The window opens but a second `md-view view` opens another window
+
+That is the known Linux `SingleInstanceLock` limitation (see [Multiple windows](#multiple-windows)). Each window shows the correct file; if you want a single window, focus the existing one.
+
+### Live reload doesn't fire
+
+Some editors write to a temp file and rename, which can evade fsnotify. Try saving again, or reopen the file from the menu / recent-files sidebar. If the file was deleted and recreated (`git checkout`), reopen it to re-establish the watch.
+
+### "command not found: md-view"
+
+md-view is not on your `PATH`. Either run it directly (`build/bin/md-view view README.md`) or install it:
 
 ```bash
-md-view view --browser firefox ./README.md
+make install      # copies to the existing md-view location, or /usr/local/bin/md-view
 ```
 
-### Live reload doesn't work
+### Build fails with CGO errors
 
-Some editors (especially those that write to a temp file and rename) may not trigger fsnotify. Try:
-
-- Saving again
-- Stopping and restarting the daemon
-- Using `--no-reload` and manually refreshing
-
-### Port conflicts
-
-If you're running multiple instances, use `--port`:
-
-```bash
-md-view view --port 8080 ./README.md
-```
-
-### Multiple daemons
-
-Only one daemon should be running at a time. Check with `md-view status`. If you see unexpected behavior, stop and restart:
-
-```bash
-md-view stop
-md-view view ./README.md
-```
-
----
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `$XDG_STATE_HOME` | `~/.local/state` | Base directory for state files |
+md-view is a CGO binary (it links the system WebView). Make sure `gcc`/`g++` (and the webkit dev libs above) are installed, and that `CGO_ENABLED=1` (the Makefile sets this for you).
 
 ---
 
@@ -649,8 +406,10 @@ md-view view ./README.md
 
 | Package | Purpose |
 |---------|---------|
+| [Wails v2](https://wails.io/) | Desktop app framework (native WebView + Go bridge) |
+| [cobra](https://github.com/spf13/cobra) | CLI command structure |
 | [goldmark](https://github.com/yuin/goldmark) | Markdown → HTML conversion |
 | [chroma](https://github.com/alecthomas/chroma) | Syntax highlighting |
 | [fsnotify](https://github.com/fsnotify/fsnotify) | File watching for live reload |
-| [Glazed](https://github.com/go-go-golems/glazed) | CLI framework (Cobra + BareCommand) |
+| [logcopter](https://github.com/go-go-golems/logcopter) | Structured logging |
 | [mermaid.js](https://mermaid.js.org/) | Diagram rendering (embedded, not a Go dependency) |
