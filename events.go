@@ -39,3 +39,25 @@ func (a *App) watchFile(abs string) {
 		}
 	}(ch, abs)
 }
+
+// unwatchFile stops watching abs: it removes the path from the App's watched
+// set and calls watcher.Unwatch, which closes the subscriber channel and so
+// lets the watchFile goroutine above exit (no more `file-changed` events for
+// this path). Called by CloseFile. Safe to call for a path that isn't watched
+// (no-op). The watcher.Unwatch call is made OUTSIDE a.mu to avoid nesting the
+// App and watcher mutexes; the brief window before the goroutine exits is
+// harmless because CloseFile clears currentFile first.
+func (a *App) unwatchFile(abs string) {
+	if a.watcher == nil {
+		return
+	}
+	a.mu.Lock()
+	_, watched := a.watched[abs]
+	if watched {
+		delete(a.watched, abs)
+	}
+	a.mu.Unlock()
+	if watched {
+		a.watcher.Unwatch(abs)
+	}
+}

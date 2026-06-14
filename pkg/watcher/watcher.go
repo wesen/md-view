@@ -84,3 +84,24 @@ func (fw *FileWatcher) Close() error {
 	close(fw.done)
 	return fw.watcher.Close()
 }
+
+// Unwatch stops watching filePath: it removes the path from the fsnotify
+// watcher and closes every subscriber channel returned by Watch for that
+// path, which causes each caller's `for range ch` goroutine to exit.
+//
+// Both the event-dispatch send in Start() and this close run under fw.mu, so
+// a send can never race with the close (no "send on closed channel" panic).
+// Safe to call for a path that isn't watched (no-op).
+func (fw *FileWatcher) Unwatch(filePath string) {
+	fw.mu.Lock()
+	defer fw.mu.Unlock()
+	targets, ok := fw.paths[filePath]
+	if !ok {
+		return
+	}
+	delete(fw.paths, filePath)
+	_ = fw.watcher.Remove(filePath)
+	for _, t := range targets {
+		close(t.ch)
+	}
+}

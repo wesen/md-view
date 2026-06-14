@@ -89,6 +89,11 @@ runtime.EventsOn('close-file', () => {
     dropzone.style.display = 'flex';
     filenameSpan.textContent = 'No file open';
     clearError();
+    // Remove the toolbar button row (reMarkable/copy/download). The Go
+    // CloseFile() already cleared App.currentFile, so MDSInitButtons removes
+    // the existing row and builds nothing (GetCurrentFile returns ""). This
+    // ensures the buttons can't keep operating on the closed file.
+    if (window.MDSInitButtons) window.MDSInitButtons();
 });
 
 // Live reload: the Go backend watches the open file with fsnotify and emits

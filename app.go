@@ -220,6 +220,29 @@ func (a *App) ReopenCurrent() (string, error) {
 	return a.openPath(a.currentFile)
 }
 
+// CloseFile clears the currently open file: clears currentFile, stops watching
+// it, and resets the native window title. The frontend's `close-file` event
+// handler does the DOM cleanup (clearing #content and removing the toolbar
+// button row). Returns the absolute path that was closed ("" if nothing was
+// open). Called by the File > Close menu before it emits `close-file`.
+//
+// currentFile is cleared BEFORE the watcher is torn down so that any
+// in-flight `file-changed` event (racing the goroutine exit) finds it empty
+// and ReopenCurrent() returns "" — the closed file can't be re-shown by a
+// late save.
+func (a *App) CloseFile() string {
+	closed := a.currentFile
+	if closed == "" {
+		return ""
+	}
+	a.currentFile = ""
+	a.unwatchFile(closed)
+	if a.ctx != nil {
+		runtime.WindowSetTitle(a.ctx, "md-view")
+	}
+	return closed
+}
+
 // currentFileTitle returns the base name of the current file ("" if none).
 // Used by the menu's file-opened event payload.
 func (a *App) currentFileTitle() string {

@@ -33,6 +33,11 @@ func buildMenu(app *App) *menu.Menu {
 	})
 	fileMenu.AddSeparator()
 	fileMenu.AddText("Close", keys.CmdOrCtrl("w"), func(_ *menu.CallbackData) {
+		// Clear backend state (currentFile + watcher + window title) before
+		// the frontend cleans up the DOM. Without this, GetCurrentFile() still
+		// reports the closed file, the toolbar buttons still target it, and a
+		// save would re-show it via ReopenCurrent().
+		app.CloseFile()
 		if app.ctx != nil {
 			wailsruntime.EventsEmit(app.ctx, "close-file", nil)
 		}
