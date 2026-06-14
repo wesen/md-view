@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -41,4 +43,35 @@ func ParseViewArgs(args []string) ViewArgs {
 		}
 	}
 	return out
+}
+
+// absolutizeFileArg resolves `file` against the current process's working
+// directory and, when it was relative, rewrites the matching entry in os.Args
+// to the absolute form. runDesktop calls this before wails.Run so that:
+//
+//   - the first instance opens the right file (PendingOpen becomes absolute),
+//   - and if Wails' SingleInstanceLock forwards THIS process to an already-
+//     running instance, the forwarded os.Args carry the absolute path.
+//
+// The os.Args rewrite is necessary because Wails' SingleInstanceLock forwards
+// os.Args[1:] verbatim, and on macOS the accompanying WorkingDirectory is the
+// executable's directory (not the caller's cwd), so a relative path would
+// resolve incorrectly in OnSecondInstanceLaunch. An already-absolute `file`
+// and any `file` not found verbatim in os.Args are returned unchanged (the
+// latter still resolves correctly for the first instance via PendingOpen).
+func absolutizeFileArg(file string) string {
+	if file == "" || filepath.IsAbs(file) {
+		return file
+	}
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		return file
+	}
+	for i, arg := range os.Args {
+		if arg == file {
+			os.Args[i] = abs
+			break
+		}
+	}
+	return abs
 }

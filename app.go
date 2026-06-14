@@ -53,6 +53,11 @@ func NewApp() *App {
 func (a *App) Startup(ctx context.Context) {
 	a.ctx = ctx
 	a.loadRecentFiles()
+	// Subscribe to Wails drag-and-drop. DragAndDrop.EnableFileDrop in the app
+	// options only arms the plumbing; the dropped paths are delivered as a
+	// `wails:file-drop` event that must be subscribed to here, otherwise the
+	// OnFileDrop handler below never fires and dropping a file does nothing.
+	runtime.OnFileDrop(ctx, a.OnFileDrop)
 	fw, err := watcher.New()
 	if err != nil {
 		logger.Warn().Err(err).Msg("cannot create file watcher; live reload disabled")
@@ -187,7 +192,14 @@ func (a *App) openPath(path string) (string, error) {
 
 	a.currentFile = abs
 	a.watchFile(abs)
-	a.addAllowedDir(filepath.Dir(abs))
+	// Register the file's directory AND its ancestors (except the filesystem
+	// root) so relative images like ![](../assets/x.png) or ../../shared/ that
+	// resolve outside the file's own dir still load. The root "/" is never
+	// registered, so /etc/passwd stays 403 even after a deep /home/... file
+	// opens — tighter than the deleted pkg/server, which registered every
+	// ancestor including "/" and thus disabled the allow-list once any file
+	// was opened.
+	a.addAllowedDirTree(filepath.Dir(abs))
 	a.pushRecent(abs)
 	runtime.WindowSetTitle(a.ctx, "md-view: "+body.Title)
 

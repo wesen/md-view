@@ -7,17 +7,33 @@ import (
 	"strings"
 )
 
-// addAllowedDir registers a directory (and, by extension, files within it) as
-// eligible for serving via ServeReferencedFile. Called when a file is opened;
-// mirrors pkg/server's handleRender allow-list population (server.go:286-294).
-func (a *App) addAllowedDir(dir string) {
+// addAllowedDirTree registers a directory and all of its ancestor directories
+// (up to, but NOT including, the filesystem root) as eligible for serving via
+// ServeReferencedFile. Called with the opened file's directory when a file is
+// opened, so that relative Markdown images such as ![](../assets/x.png) or
+// ../../shared/logo.png — which renderer.rewriteImagePaths resolves to an
+// absolute /file/... URL outside the file's own directory — still load.
+//
+// The root "/" is deliberately never registered. This keeps /etc/passwd and
+// other system paths 403 even after a file deep under /home/... opens. This
+// is intentionally tighter than the deleted pkg/server, which registered every
+// ancestor including "/" and so effectively disabled the allow-list once any
+// file was opened.
+func (a *App) addAllowedDirTree(dir string) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return
 	}
 	a.mu.Lock()
-	a.allowedDirs[abs] = struct{}{}
-	a.mu.Unlock()
+	defer a.mu.Unlock()
+	for abs != string(filepath.Separator) {
+		a.allowedDirs[abs] = struct{}{}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			break // reached the root
+		}
+		abs = parent
+	}
 }
 
 // isAllowed reports whether absPath is a regular file inside one of the

@@ -77,6 +77,18 @@ Examples:
 // runDesktop starts the Wails app, opening `file` (if non-empty) with the
 // given initial theme. It blocks until the window closes.
 func runDesktop(file string, dark bool) error {
+	// Resolve a relative path to absolute NOW, in the invoking process, so:
+	//   - the first instance opens the right file (PendingOpen is absolute,
+	//     resolved against the caller's cwd), and
+	//   - if Wails' SingleInstanceLock forwards this process to an already-
+	//     running instance, the forwarded os.Args carry an absolute path.
+	//     This matters on macOS, where Wails sets the forwarded
+	//     SecondInstanceData.WorkingDirectory to the executable's directory
+	//     (filepath.Dir(os.Executable())) rather than the caller's cwd, so a
+	//     relative path joined against it in OnSecondInstanceLaunch would
+	//     resolve to the wrong location. (Linux/Windows forward os.Getwd().)
+	file = absolutizeFileArg(file)
+
 	app := NewApp()
 	app.PendingOpen = file
 	app.PendingDark = dark
