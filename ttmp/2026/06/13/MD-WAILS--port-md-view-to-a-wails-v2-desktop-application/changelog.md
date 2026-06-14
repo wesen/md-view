@@ -53,3 +53,15 @@ Added implementation review / lessons-learned document for a new maintainer or i
 
 - /home/manuel/code/wesen/2026-05-07--md-server/ttmp/2026/06/13/MD-WAILS--port-md-view-to-a-wails-v2-desktop-application/design-doc/01-implementation-review-and-lessons-learned.md — Post-implementation technical review deliverable
 
+
+## 2026-06-14
+
+Phase 9 (documentation cutover): rewrote README.md, docs/getting-started.md, docs/user-guide.md to match the single-binary Wails model. Removed docs for deleted subsystems (HTTP API, Unix Socket Protocol, Daemon Management, browser selection, serve/status/stop, --browser/--no-reload/--port flags). Install now leads with make build (NOT go install .../cmd/md-view). Verified AGENT.md is clean (historical refs only). grep validation (task 9.7) passes: zero live operational references to the old model. Also marked Phase 8 done in tasks.md (was implemented but unchecked).
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-05-07--md-server/AGENT.md — Verified clean — only historical daemon/socket refs explaining the cutover (no rewrite needed)
+- /home/manuel/code/wesen/2026-05-07--md-server/README.md — Rewritten for the Wails single-binary model (install via make build
+- /home/manuel/code/wesen/2026-05-07--md-server/docs/getting-started.md — Rewritten — native window first view
+- /home/manuel/code/wesen/2026-05-07--md-server/docs/user-guide.md — Major surgery — removed HTTP API/Unix Socket/Daemon Management/browser-selection/serve-status-stop; rewrote view/Dark Theme/Live Reload/Security/Troubleshooting for Wails
+

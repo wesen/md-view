@@ -3,22 +3,27 @@ Title: Implementation Review and Lessons Learned
 Ticket: MD-WAILS
 Status: active
 Topics:
-  - markdown
-  - go
-  - architecture
-  - wails
-  - desktop
-  - web
+    - markdown
+    - go
+    - architecture
+    - wails
+    - desktop
+    - web
 DocType: design-doc
 Intent: long-term
 Owners: []
-RelatedFiles: []
+RelatedFiles:
+    - Path: README.md
+      Note: 'Review''s #1 finding (stale docs) now resolved by Phase 9'
+    - Path: docs/user-guide.md
+      Note: Review flagged user-guide as stale; rewritten in Phase 9.4
 ExternalSources: []
-Summary: Review of the md-view Wails rewrite: current architecture, subsystem map, what worked, what was weak, what should have been known earlier, and what a new intern should learn next.
+Summary: 'Review of the md-view Wails rewrite: current architecture, subsystem map, what worked, what was weak, what should have been known earlier, and what a new intern should learn next.'
 LastUpdated: 2026-06-13T18:30:00-04:00
 WhatFor: Intern-facing implementation review and lessons-learned document for the completed md-view -> Wails v2 replacement.
 WhenToUse: Read after the implementation guide when reviewing the finished system, planning follow-up work, or onboarding a new engineer to maintain the rewritten app.
 ---
+
 
 
 

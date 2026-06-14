@@ -1,11 +1,25 @@
 ---
-title: "Investigation diary"
-ticket: MD-WAILS
-doc-type: reference
-status: active
-intent: long-term
-topics: [markdown, go, architecture, wails, desktop, web]
+Title: ""
+Ticket: ""
+Status: ""
+Topics: []
+DocType: ""
+Intent: ""
+Owners: []
+RelatedFiles:
+    - Path: README.md
+      Note: Diary Steps 13-15 document the Phase 9 README rewrite
+    - Path: docs/getting-started.md
+      Note: Diary Step 14 documents the getting-started rewrite
+    - Path: docs/user-guide.md
+      Note: Diary Step 15 documents the user-guide surgery (removed HTTP/socket/daemon sections)
+ExternalSources: []
+Summary: ""
+LastUpdated: 0001-01-01T00:00:00Z
+WhatFor: ""
+WhenToUse: ""
 ---
+
 
 # Investigation diary
 

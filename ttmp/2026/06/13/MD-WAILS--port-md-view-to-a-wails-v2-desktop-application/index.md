@@ -14,9 +14,9 @@ Intent: long-term
 Owners: []
 RelatedFiles: []
 ExternalSources: []
-Summary: "REPLACE md-view with a single Wails v2 binary (still named md-view) that is drop-in CLI compatible: `md-view view <file> [--dark]` opens a native window; a second invocation reuses it via SingleInstanceLock. Daemon/socket/PID/HTTP packages are deleted."
-LastUpdated: 2026-06-13T17:00:35.933560277-04:00
-WhatFor: "Intern-grade analysis, design, and implementation guide for REPLACING md-view with a drop-in Wails v2 desktop binary."
+Summary: "REPLACE md-view with a single Wails v2 binary (still named md-view) that is drop-in CLI compatible: `md-view view <file> [--dark]` opens a native window; a second invocation reuses it via SingleInstanceLock. Daemon/socket/PID/HTTP packages are deleted. Implementation (Phases 0-8) and user-facing docs cutover (Phase 9) are complete."
+LastUpdated: 2026-06-14T00:00:00-04:00
+WhatFor: "Intern-grade analysis, design, implementation guide, and post-implementation review for REPLACING md-view with a drop-in Wails v2 desktop binary. All phases (0-9) complete: code shipped, user docs rewritten to match."
 WhenToUse: "Read before starting any Wails port work; the phased plan in the design doc is the execution roadmap."
 ---
 
@@ -37,7 +37,7 @@ A working proof-of-concept exists at `/home/manuel/code/wesen/2026-06-13--wails-
 
 ## Status
 
-Current status: **active**
+Current status: **active — implementation (Phases 0–8) and user-facing documentation cutover (Phase 9) are complete.** The code shipped a single Wails binary and the README/getting-started/user-guide now match it. Known limitation: the Linux `SingleInstanceLock` multi-window behavior (accepted). Open follow-ups: theme persistence (OQ-2), a real GoReleaser release dry run, and focused unit tests for `assets.go`/`recent.go`.
 
 ## Topics
 
