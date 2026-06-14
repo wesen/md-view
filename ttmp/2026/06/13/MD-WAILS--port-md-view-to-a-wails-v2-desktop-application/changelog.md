@@ -65,3 +65,16 @@ Phase 9 (documentation cutover): rewrote README.md, docs/getting-started.md, doc
 - /home/manuel/code/wesen/2026-05-07--md-server/docs/getting-started.md — Rewritten — native window first view
 - /home/manuel/code/wesen/2026-05-07--md-server/docs/user-guide.md — Major surgery — removed HTTP API/Unix Socket/Daemon Management/browser-selection/serve-status-stop; rewrote view/Dark Theme/Live Reload/Security/Troubleshooting for Wails
 
+
+## 2026-06-14
+
+Addressed PR #2 Codex review (3 P2 comments on app.go): (1) drag-drop was non-functional — registered runtime.OnFileDrop in Startup (EnableFileDrop only arms the plumbing); (2) parent-relative images (../assets/x.png) returned 403 — addAllowedDirTree now registers the file's dir + ancestors except root, so ../images load while /etc/passwd stays 403; (3) relative paths broke the macOS single-instance handoff (Wails sets WorkingDirectory to the executable dir on Darwin) — absolutizeFileArg resolves + rewrites os.Args in the invoking process. Added 4 unit tests. Verified ../assets->200/passwd->403; build/test/lint green; native Startup runs clean. Commit e680fc0.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-05-07--md-server/app.go — Startup now registers runtime.OnFileDrop(ctx
+- /home/manuel/code/wesen/2026-05-07--md-server/assets.go — addAllowedDirTree registers dir + ancestors excluding filesystem root (../images fix
+- /home/manuel/code/wesen/2026-05-07--md-server/cli.go — absolutizeFileArg resolves relative paths + rewrites os.Args before wails.Run (macOS single-instance handoff fix)
+- /home/manuel/code/wesen/2026-05-07--md-server/cli_test.go — 4 new tests (absolutizeFileArg x3
+- /home/manuel/code/wesen/2026-05-07--md-server/main.go — runDesktop calls absolutizeFileArg so PendingOpen is absolute and forwarded args are absolute
+

@@ -1044,3 +1044,81 @@ The user-guide was the largest surgery: it contained whole sections documenting 
 - Commit (this step): see `git log` for the user-guide rewrite.
 - Sections removed: HTTP API (render/raw/static/SSE), Unix Socket Protocol, Daemon Management (state files / stale PID), Browser Integration (browser selection), `serve`/`status`/`stop`.
 - Sections added/rewritten: Opening Files, Relative Images, reMarkable/Copy/Download, Recent Files (per-OS paths), Multiple windows, Security (allow-list only), Troubleshooting (webkit + build-tags + CGO).
+
+## Step 16: Address PR #2 Codex review (drag-drop, parent-relative images, relative-path handoff)
+
+After the docs cutover, the user asked to address the automated Codex review comments on PR #2. The review left three P2 inline comments on `app.go`, all of which I verified against the Wails v2.12.0 source and the deleted `pkg/server` before changing anything — two were fully valid bugs, one was partially valid (macOS-only).
+
+### Prompt Context
+
+**User prompt (verbatim):** "Address code review commands: https://github.com/go-go-golems/md-view/pull/2"
+
+**Assistant interpretation:** Read the three Codex inline review comments on PR #2, verify each claim against the actual Wails source and the deleted code, fix the real bugs, add tests, and commit + reply on the PR.
+
+**Inferred user intent:** Don't blindly apply or dismiss bot suggestions — investigate each, fix what's genuinely broken, and document the reasoning so the review thread has a defensible resolution.
+
+### What I did
+
+- **Fetched the 3 comments** via `gh api .../pulls/2/comments`: drag-drop callback not registered (app.go:313), parent-relative images 403 (app.go:190), `WorkingDirectory` resolving to the executable dir (app.go:122).
+- **Verified each against source before touching code:**
+  - *#1:* read `wails/v2@v2.12.0/pkg/runtime/draganddrop.go` — `OnFileDrop(ctx, cb)` subscribes to the `wails:file-drop` event; the bound method `a.OnFileDrop` was never registered via `runtime.OnFileDrop`, so drops never reached it. **Valid bug.** The diary's Phase-5 "drag-drop works" claim was unverified — it never actually fired.
+  - *#2:* read the deleted `pkg/server` from `git show 160897c~1` — it registered the file's dir **and all ancestors** (server.go:282-289). The new code registered only the immediate dir, so `![](../assets/x.png)` (rewritten to an absolute `/file/...` URL outside that dir) got 403. **Valid regression.**
+  - *#3:* read `wails/v2@v2.12.0/pkg/options/options.go` `NewSecondInstanceData()` plus each platform's `single_instance.go` — Linux (`linux/single_instance.go:56`) and Windows send `os.Getwd()` (correct), but **Darwin** calls `NewSecondInstanceData()` which sets `WorkingDirectory = filepath.Dir(os.Executable())`. So the relative-path bug only manifests on macOS. **Partially valid.**
+- **Implemented the fixes:**
+  - *#1:* added `runtime.OnFileDrop(ctx, a.OnFileDrop)` in `Startup` (app.go), with a comment that `EnableFileDrop` only arms the plumbing.
+  - *#2:* replaced `addAllowedDir` with `addAllowedDirTree` (assets.go) — registers the file's dir and all ancestors **except the filesystem root**. This fixes `../assets` and `../../shared` images while keeping `/etc/passwd` 403 (tighter than the old server, which registered `/` and effectively disabled the allow-list once any file opened).
+  - *#3:* added `absolutizeFileArg` (cli.go) called from `runDesktop` (main.go) — resolves the path to absolute in the invoking process and rewrites the matching `os.Args` entry so the SingleInstanceLock handoff forwards an absolute path regardless of platform. The `OnSecondInstanceLaunch` `WorkingDirectory` join is kept as a safety net (now dead for the common case since paths arrive absolute).
+- **Added 4 unit tests:** `TestAbsolutizeFileArgRewritesOsArgs`, `TestAbsolutizeFileArgPreservesAbsolute`, `TestAbsolutizeFileArgEmpty`, `TestAddAllowedDirTree` (verifies `../assets` allowed, `/etc/passwd` + `/` forbidden).
+- **Lint fix:** golangci-lint flagged the loop (`QF1006`); folded the root check into the loop condition.
+
+### Why
+
+- Each fix was grounded in the Wails source rather than the bot's prose, so the resolution is defensible in the review thread. The macOS-only nature of #3 mattered because it changes how I framed the fix (platform-independent absolutization, not a darwin-specific patch).
+- For #2 I deliberately chose "ancestors except root" over the old "all ancestors including root" — the old behavior made the whole filesystem readable after opening one file, which the diary (Phase 4) had explicitly tested against (`/etc/passwd` → 403). Replicating it would have silently broken that security property.
+
+### What worked
+
+- **E2E-verified #2 via the dev server + Playwright:** opened `/tmp/md-review-test/sub/doc.md` (`![](../assets/diagram.png)`); the rewritten `/file/tmp/md-review-test/assets/diagram.png` returned **200** (was 403), and `/file/etc/passwd` returned **403**. The `/file/` → 200 is a dev-server SPA fallback for the malformed empty target (returns index.html, not file contents), not a security issue.
+- `make build` produced `build/bin/md-view` (17 MB); launching it with `view` opened a native window, proving `Startup` (including the new `runtime.OnFileDrop` registration) runs without error.
+- All unit tests + `go vet` + `golangci-lint` (0 issues) green.
+
+### What didn't work
+
+- **Could not fully E2E-verify #1 (drag-drop) in browser dev mode.** Emitting `wails:file-drop` from JS via `runtime.EventsEmit` did NOT trigger the Go listener (`GetCurrentFile()` unchanged). Root cause: `wails:`-prefixed events are emitted by the **native webview** (WebKitGTK), not deliverable from JS — confirmed by reading `runtime_debug_desktop.js` (the JS-side `OnFileDrop` registers DOM `drop` listeners + `EventsOn("wails:file-drop")`, and the native C code emits the event). So browser dev mode can't simulate a real drop. Relied instead on (a) the registration matching the v2.12.0 API exactly (signature + event name) and (b) the native window launching without Startup error. A real GUI drag-drop test needs native-window automation (xdotool/wmctrl), which Playwright-on-browser can't do.
+
+### What I learned
+
+- `DragAndDrop.EnableFileDrop` is a common Wails footgun: it enables the plumbing but you must still call `runtime.OnFileDrop` to receive drops. The bound-method-with-the-right-signature pattern is misleading because it *looks* wired up but isn't.
+- The `SecondInstanceData.WorkingDirectory` is platform-divergent in Wails v2.12.0: `os.Getwd()` on Linux/Windows, `filepath.Dir(ex)` on Darwin. Any code joining a relative path against it is correct on 2/3 platforms and wrong on macOS.
+- An allow-list that registers ancestors up to `/` is effectively no allow-list. Excluding the root is the cheap, correct tightening that preserves both `../images` and `/etc/passwd` 403.
+
+### What was tricky to build
+
+- **Verifying #1 without a real drop.** The temptation is to "trust the API" and ship, but the diary had already once claimed drag-drop worked when it didn't. I verified the registration three ways (source signature match, dev-server Startup ran without panic, native binary launched) and documented the residual verification gap honestly rather than overstating confidence.
+- **The #2 security tradeoff.** The reviewer wanted the regression fixed; the old code's "all ancestors" was itself a latent security weakness. "Ancestors except root" satisfies both — but I had to reason it through rather than copy the old behavior.
+
+### What warrants a second pair of eyes
+
+- **#1 real-drop verification:** confirm on a platform with a GUI that dragging a `.md` onto the window actually opens it. The code is correct per the API; the gap is purely test infrastructure.
+- **#3 macOS verification:** the darwin `NewSecondInstanceData` path can't be exercised on this Linux machine. Confirm the absolutized-forwarded-args behave correctly on macOS where dedup engages.
+- The `absolutizeFileArg` `os.Args` scan matches the first occurrence of `file`; pathological inputs (a file literally named `view`) are already handled by `ParseViewArgs` ignoring `view`, but worth a glance.
+
+### What should be done in the future
+
+- Add a native-GUI drag-drop smoke test (xdotool or Wails test harness) to close the #1 verification gap.
+- Consider upstreaming a doc note to Wails that `EnableFileDrop` requires `runtime.OnFileDrop` (the footgun is general).
+- Reply to the three PR review threads with the resolution + commit hash.
+
+### Code review instructions
+
+- `app.go`: `Startup` registers `runtime.OnFileDrop`; `openPath` calls `addAllowedDirTree`.
+- `assets.go`: `addAllowedDirTree` (dir + ancestors, excluding root).
+- `main.go` + `cli.go`: `absolutizeFileArg` resolves + rewrites `os.Args` before `wails.Run`.
+- `cli_test.go`: 4 new tests.
+- Validate: `go test -tags webkit2_41 -run 'TestAbsolutizeFileArg|TestAddAllowedDirTree' -v .`; `make build && build/bin/md-view view README.md`; (E2E #2) `wails dev` + open a doc with `../assets/x.png` → image 200, `/file/etc/passwd` → 403.
+
+### Technical details
+
+- Commit (this step): `e680fc0` (amended from `d8d7aa4` to fix a backtick-in-commit-message shell-substitution that ate `wails:file-drop`).
+- Wails source verified: `pkg/runtime/draganddrop.go`, `pkg/options/options.go` (`NewSecondInstanceData`), `internal/frontend/desktop/{linux,windows,darwin}/single_instance.go`, `internal/frontend/runtime/runtime_debug_desktop.js`.
+- Deleted-code reference: `git show 160897c~1:pkg/server/server.go` (ancestors allow-list at lines 282-289).
