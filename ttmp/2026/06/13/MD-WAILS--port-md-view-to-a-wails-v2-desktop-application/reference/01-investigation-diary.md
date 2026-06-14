@@ -1122,3 +1122,82 @@ After the docs cutover, the user asked to address the automated Codex review com
 - Commit (this step): `e680fc0` (amended from `d8d7aa4` to fix a backtick-in-commit-message shell-substitution that ate `wails:file-drop`).
 - Wails source verified: `pkg/runtime/draganddrop.go`, `pkg/options/options.go` (`NewSecondInstanceData`), `internal/frontend/desktop/{linux,windows,darwin}/single_instance.go`, `internal/frontend/runtime/runtime_debug_desktop.js`.
 - Deleted-code reference: `git show 160897c~1:pkg/server/server.go` (ancestors allow-list at lines 282-289).
+
+## Step 17: Address PR #2 review — clear backend state on File > Close
+
+A fourth Codex review comment arrived, this time on `frontend/dist/app.js` (the `close-file` event handler, lines 86–90). The claim: closing a file only hid the DOM, leaving `App.currentFile` set, the watcher running, and the `#md-view-button-row` in place — so the toolbar still targeted the old file and the next save re-showed it via `ReopenCurrent()`.
+
+### Prompt Context
+
+**User prompt (verbatim):** (pasted the Codex review comment on `frontend/dist/app.js` 86–90 about backend state not being cleared on close.)
+
+**Assistant interpretation:** Verify each sub-claim against the code, then fix Close so it clears backend state (`currentFile`, watcher, window title) AND removes the toolbar button row, so the closed file can't be acted on or re-shown.
+
+**Inferred user intent:** Make File > Close actually close the file across the whole stack — backend state, watcher, and the toolbar — not just the content DOM.
+
+### What I did
+
+- **Verified all five sub-claims by tracing the code** before changing anything:
+  1. `menu.go` Close emits `close-file` with `nil` and calls no Go method → `a.currentFile` never reset. ✓
+  2. `openPath` calls `watchFile`; there is no unwatch-on-close → the watcher goroutine keeps emitting `file-changed` for the closed file's path. ✓
+  3. `buttons.js` `MDSInitButtons` is only called from `showContent` (open), never on close → `#md-view-button-row` persists with the old path captured in its closure. ✓
+  4. `GetCurrentFile()` still returns the closed file → toolbar actions target it. ✓
+  5. The `file-changed` listener calls `ReopenCurrent()` unconditionally (it does NOT compare `data.path` to the current file) → a save re-renders `a.currentFile` (still set) → `showContent` re-shows it. ✓
+- **Implemented the fix:**
+  - `app.go`: new `CloseFile() string` bound method — clears `currentFile`, unwatches the file, resets the native window title. `currentFile` is cleared *before* the watcher teardown so a racing `file-changed` finds it empty.
+  - `events.go`: new `unwatchFile(abs)` helper (mirrors `watchFile`); calls `watcher.Unwatch` outside `a.mu` to avoid nesting the App and watcher mutexes.
+  - `menu.go`: File > Close now calls `app.CloseFile()` before emitting `close-file`.
+  - `frontend/dist/app.js`: the `close-file` handler now calls `MDSInitButtons()`, which (idempotently) removes the existing row and builds nothing since `GetCurrentFile()` returns `""`.
+  - `pkg/watcher/watcher.go`: added `Unwatch(filePath)` — removes the path from fsnotify and closes every subscriber channel, so the App goroutine exits. This is the "eviction on close" the diary Step 6 had deferred ("the `watched` map never has entries removed"). Safe because both the dispatch send in `Start()` and the close in `Unwatch` run under the same `fw.mu` (no send-on-closed-channel race).
+  - `pkg/watcher/watcher_test.go` (new): 3 tests — `TestUnwatchClosesChannel`, `TestUnwatchUnknownPathIsNoOp`, `TestUnwatchRemovesFromInternalMap`.
+
+### Why
+
+- The bug spanned the full stack, so a frontend-only fix would have left `currentFile` set and `ReopenCurrent()` re-showing the file. The backend clear is what actually closes the file; the frontend row removal is the visible consequence.
+- I added `watcher.Unwatch` rather than relying on clearing `currentFile` alone (which would have left the goroutine + fsnotify watch leaking forever). Eviction-on-close was already flagged as deferred work; this was the moment to do it.
+- Reusing `MDSInitButtons()` for the row removal (instead of a bespoke `document.getElementById(...).remove()`) keeps the button-row lifecycle in one place and handles the empty-`GetCurrentFile` case correctly (remove old, build nothing).
+
+### What worked
+
+- **E2E-verified the full open→close→late-save path** via `wails dev` + Playwright through the real event flow (`OpenFileAtPath` → emit `file-opened` → `showContent` builds the 3-button row → `CloseFile` → emit `close-file`). After close: `GetCurrentFile()==""`, `#md-view-button-row` removed, `ReopenCurrent()==""`, and writing to the **closed** file did **not** fire `file-changed` (watcher unwatched). Positive control: writing to an **open** file still reloads (`liveReloadFiredWhenOpen: true`).
+- `go test -tags webkit2_41 ./...` green (incl. 3 new watcher tests); `golangci-lint` 0 issues.
+
+### What didn't work
+
+- **First E2E attempt used the wrong open path.** Calling `OpenFileAtPath` directly returns HTML to JS but does NOT call `showContent` (only the `file-opened` event does), so the button row never built and `buttonRowPresent` was `false` even before close. Fixed by emitting `file-opened` after `OpenFileAtPath` to exercise the real `showContent` → `MDSInitButtons` path. Lesson: when verifying frontend side effects, drive them through the event the app actually uses, not the bound method's return value.
+
+### What I learned
+
+- `pkg/watcher` had no per-file unwatch — only `Close()` (whole watcher). Adding `Unwatch` is a clean, lock-safe extension (send + close both under `fw.mu`). The subscriber channel is the same object the caller holds as `<-chan struct{}`, so closing it from the watcher side makes the caller's `for range` exit — the standard Go "close to signal completion" pattern.
+- The frontend `file-changed` listener does NOT compare `data.path` to the current file; it just calls `ReopenCurrent()`. Clearing `currentFile` is therefore what makes a late save a no-op, even before unwatching. Unwatching is the belt; clearing `currentFile` is the suspenders.
+
+### What was tricky to build
+
+- **Lock ordering in `unwatchFile`.** I call `watcher.Unwatch` *outside* `a.mu` (delete from `a.watched` under `a.mu`, release, then unwatch). Nesting `a.mu` → `fw.mu` would be consistent with `watchFile` (which takes `a.mu` then `fw.mu` via `Watch`) and is safe, but calling outside avoids holding `a.mu` across the watcher's internal work. The brief window between the map delete and `Unwatch` is harmless because `CloseFile` already cleared `currentFile`.
+- **The racing `file-changed`.** Ordered `CloseFile` to clear `currentFile` *before* `unwatchFile` so that any event the watcher goroutine emits before it exits finds `currentFile==""` and `ReopenCurrent()` returns `""`.
+
+### What warrants a second pair of eyes
+
+- The pre-existing multi-open accumulation: opening A then B watches both (no unwatch of A on open B). A save to A emits `file-changed` → frontend calls `ReopenCurrent()` → re-renders B. This is NOT what this review comment is about (it's about Close), but it's a latent issue worth a follow-up: `openPath` should unwatch the previous `currentFile` when switching files. Tracked below.
+- The frontend `file-changed` listener ignoring `data.path` — a defense-in-depth compare to the current file would catch stray events, but with unwatch-on-close + clear-`currentFile` it's not strictly needed.
+
+### What should be done in the future
+
+- **Follow-up (latent, not this review):** in `openPath`, unwatch the previous `currentFile` before setting the new one, so switching files stops watching the old one (closes the multi-open accumulation and the "save A re-renders B" edge).
+- Optionally have the frontend `file-changed` listener compare `data.path` to the current file as defense-in-depth.
+
+### Code review instructions
+
+- `app.go`: `CloseFile() string` (clears state, unwatches, resets title).
+- `events.go`: `unwatchFile(abs)`.
+- `menu.go`: File > Close calls `app.CloseFile()` before emitting `close-file`.
+- `frontend/dist/app.js`: `close-file` handler calls `MDSInitButtons()`.
+- `pkg/watcher/watcher.go`: `Unwatch(filePath)`.
+- `pkg/watcher/watcher_test.go`: 3 new tests.
+- Validate: `go test -tags webkit2_41 ./pkg/watcher/... -v`; `wails dev` + Playwright open→close→late-save (GetCurrentFile ""→"" , button row removed, closed-file write does NOT reload, open-file write DOES).
+
+### Technical details
+
+- Commit (this step): `8322db1`.
+- PR reply: posted in-thread at `discussion_r3409639319`.
+- Wails watcher concurrency: dispatch send (`Start()`) and channel close (`Unwatch`) both under `fw.mu` → no send-on-closed race.

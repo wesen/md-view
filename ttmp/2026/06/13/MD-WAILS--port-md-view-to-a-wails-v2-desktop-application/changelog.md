@@ -78,3 +78,17 @@ Addressed PR #2 Codex review (3 P2 comments on app.go): (1) drag-drop was non-fu
 - /home/manuel/code/wesen/2026-05-07--md-server/cli_test.go — 4 new tests (absolutizeFileArg x3
 - /home/manuel/code/wesen/2026-05-07--md-server/main.go — runDesktop calls absolutizeFileArg so PendingOpen is absolute and forwarded args are absolute
 
+
+## 2026-06-14
+
+Addressed 4th PR #2 Codex review comment (frontend/dist/app.js close-file handler): File > Close only hid the DOM, leaving App.currentFile set, the watcher running, and the #md-view-button-row in place (toolbar still targeted the old file; a save re-showed it via ReopenCurrent). Fix: new CloseFile() bound method (app.go) clears currentFile + unwatches + resets title; menu.go calls it before emitting close-file; frontend close-file handler calls MDSInitButtons() to remove the button row; new pkg/watcher Unwatch (the eviction-on-close deferred in diary Step 6) + 3 unit tests. E2E verified: after close GetCurrentFile==", button row gone, ReopenCurrent==", closed-file write does NOT reload; open-file write still does. Commit 8322db1.
+
+### Related Files
+
+- /home/manuel/code/wesen/2026-05-07--md-server/app.go — CloseFile() clears currentFile
+- /home/manuel/code/wesen/2026-05-07--md-server/events.go — unwatchFile(abs) mirrors watchFile; calls watcher.Unwatch outside a.mu
+- /home/manuel/code/wesen/2026-05-07--md-server/frontend/dist/app.js — close-file handler calls MDSInitButtons() to remove the toolbar button row
+- /home/manuel/code/wesen/2026-05-07--md-server/menu.go — File > Close now calls app.CloseFile() before emitting close-file
+- /home/manuel/code/wesen/2026-05-07--md-server/pkg/watcher/watcher.go — Unwatch(filePath) removes from fsnotify + closes subscriber channels (eviction-on-close
+- /home/manuel/code/wesen/2026-05-07--md-server/pkg/watcher/watcher_test.go — new — 3 tests for Unwatch
+
